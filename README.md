@@ -23,8 +23,7 @@ in the SWEF-family proteins.
 
 ## Folder structure
 Figures generated are stored in a Figures subfolder, data are stored in the
-Data subfolder, and in the future, code files will be stored in a Scripts
-subfolder.
+Data subfolder, and code-associated files are stored in the Code subfolder.
 
 ## Installation
 This code is an R markdown file.
