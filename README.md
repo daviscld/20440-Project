@@ -39,3 +39,4 @@ viridis
 
 Use the command install.packages(c("readr", "pheatmap", "dendsort", "viridis"))
 
+Run the markdown file by clicking run in the upper righthand corner and selecting run all.
