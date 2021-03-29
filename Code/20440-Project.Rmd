@@ -24,7 +24,7 @@ set.seed(1234)  # random seed for reproducibility
 
 ```{r GEO data from downloaded csv}
 # Import the data and look at the first six rows- gives data in log2 cpm
-data <- read.csv(file = '../20440-Project/Data/ABC_WT_DKO.csv')
+data <- read.csv(file = '../Data/ABC_WT_DKO.csv')
 head(data)
 
 # Pull out gene names, counts (log2 cpm)
@@ -95,7 +95,7 @@ plt <- pheatmap(Xtmp, color = viridis(9),
          )
 
 #Print heatmap to pdf
-pdf(paste("../20440-Project/Figures/Pheatmap",".pdf", sep = ""), 
+pdf(paste("../Figures/Pheatmap",".pdf", sep = ""), 
     width = 10, height = 8) 
 print(plt)
 dev.off()
