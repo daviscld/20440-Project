@@ -13,19 +13,8 @@ knitr::opts_chunk$set(echo = TRUE) #set knitr options
 #Load packages
 
 ```{r load, include=FALSE}
-library(systemsseRology)
-library(BiocManager)
-library(forcats)
-library(stringr)
-library(ggplot2)
-library(ggrepel)
 library(readr)
-library(tidyr)
-library(survminer)
-library(GEOquery)
-library(limma)
 library(pheatmap)
-library(org.Hs.eg.db)
 library(dendsort)
 library(viridis)
 set.seed(1234)  # random seed for reproducibility
@@ -56,17 +45,26 @@ ID <- c("WT","WT","DKO","DKO")
 #Only use top-50 most significant differentially expressed genes
 Xtmp <- X[,1:50]
 
-#Sort hierarchical clustering tree arms by strength of association
-
-#Use average Euclidean distance to cluster top-50 genes
+#Cluster genes using hierarchical clustering with average Euclidean distance
 mat_cluster_cols <- hclust(dist(t(Xtmp)), method="average")
 
-#Define sorting function to sort clustering distances by magnitude
+#Define sorting function to sort dendrogram/clustering distances by magnitude
 sort_hclust <- function(...) as.hclust(dendsort(as.dendrogram(...)))
 
 #Sort columns and rows according to sorting function
 mat_cluster_cols <- sort_hclust(mat_cluster_cols)
 mat_cluster_rows <- sort_hclust(hclust(dist(X)))
+
+#Define quantile_breaks function to take given matrix, split into 10 equal
+#pieces, and return break locations. This will be used to color the heatmap
+#with each color representing 10% of the data, to distinguish deciles
+quantile_breaks <- function(xs, n = 10) {
+  breaks <- quantile(xs, probs = seq(0, 1, length.out = n), na.rm = TRUE)
+  breaks[!duplicated(breaks)]
+}
+
+#Use break function to create breaks in gene expression data 
+mat_breaks <- quantile_breaks(Xtmp, n = 10)
 
 #Label heatmap rows with sample type, columns with gene names
 annotation_row = data.frame(strain = ID)
@@ -78,9 +76,10 @@ my_colors <- list(
 
 #generate heatmap of log2 cpm count for top-50 differentially expressed genes,
 #using sample color assignment, clustering columns and rows in previously sorted 
-#order from sort_hclust, and providing specific font and cell sizes
+#order from sort_hclust, breaks from previously defined mat_breaks,
+#and providing specific font and cell sizes
 
-plt <- pheatmap(Xtmp, color = viridis(10), 
+plt <- pheatmap(Xtmp, color = viridis(9), 
          annotation_colors = my_colors, 
          annotation_row = annotation_row, 
          cellwidth = 8, 
@@ -88,14 +87,15 @@ plt <- pheatmap(Xtmp, color = viridis(10),
          fontsize = 12, 
          border_color = "grey", 
          treeheight_row = 3, 
-         treeheight_col = 75,
+         treeheight_col = 12,
+         breaks = mat_breaks,
          cluster_cols = mat_cluster_cols,
          cluster_rows = mat_cluster_rows,
          cex = 0.7
          )
 
 #Print heatmap to pdf
-pdf(paste("../20440-Project/Rep1/20440-Project/Pheatmap",".pdf", sep = ""), 
+pdf(paste("../20440-Project/Pheatmap",".pdf", sep = ""), 
     width = 10, height = 8) 
 print(plt)
 dev.off()
