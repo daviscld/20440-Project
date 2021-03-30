@@ -17,6 +17,10 @@ library(readr)
 library(pheatmap)
 library(dendsort)
 library(viridis)
+library(ggrepel)
+library(ggplot2)
+library(dplyr)
+library(limma)
 set.seed(1234)  # random seed for reproducibility
 ```
 
@@ -36,6 +40,68 @@ counts <- t(counts)
 #Z-score gene counts, create list of sample types
 X <- scale(counts, center = TRUE, scale = TRUE)
 ID <- c("WT","WT","DKO","DKO")
+```
+
+#PCA for visualization of samples
+
+```{r PCA}
+
+#Create pca model from Z-scored gene counts
+pca <- prcomp(X)
+
+## Add sample info to PCs and plot
+as.data.frame(cbind(as.character(ID), pca$x)) %>%
+ggplot(aes(x = PC1, y=PC2, col=ID,label=ID, color=ID)) + 
+  geom_point(shape = 21, size = 1) + geom_text_repel() +
+  ggtitle("PCA of WT vs DKO ABC Transcriptome") +
+  theme_classic() +
+  theme(axis.text.x = element_blank(), axis.text.y = element_blank(),
+        axis.ticks = element_blank(), 
+        plot.title = element_text(hjust=0.5, size = 18))
+
+```
+
+# Differential Expression Analysis ("DE")
+
+```{r Differential Expression}
+
+#Create design matrix designating each sample as DKO or WT
+design <- model.matrix(~0+ID)
+colnames(design) <- c("DKO","WT")
+
+#Fit a linear model of gene counts by the design matrix, 
+#so each group is compared. Transpose cpm counts to align with design matrix.
+fit <- lmFit(t(counts), design)
+
+#Compare DKO to WT
+contrasts <- makeContrasts(DKO - WT, levels=design)
+fit2 <- contrasts.fit(fit, contrasts)
+
+#Fit with empirical Bayes' to get DE stats and p-value
+#(CONFIRM P VALUE ADJ APPROACH)
+fit2 <- eBayes(fit2)
+
+#Check how many genes are overexpressed in each condition and which are 
+#equally expressed (~10% of genes are significantly diff. expressed)
+table(decideTests(fit2))
+full_results <- topTable(fit2, number=Inf)
+full_results <- tibble::rownames_to_column(full_results,"ID")
+
+#Volcano plot of differential expression and significance
+## change according to your needs
+p_cutoff <- 0.01
+fc_cutoff <- 1
+topN <- 20
+
+full_results %>% 
+  mutate(Significant = adj.P.Val < p_cutoff, abs(logFC) > fc_cutoff ) %>% 
+  mutate(Rank = 1:n(), Label = ifelse(Rank < topN, colnames(counts),"")) %>% 
+  ggplot(aes(x = logFC, y = B, col=Significant,label=Label)) + geom_point() + 
+  geom_text_repel(col="black", max.overlaps = 20) +
+  ggtitle("Differential Expression Analysis- WT vs DKO ABCs") +
+  theme_light() +
+  theme(plot.title = element_text(hjust=0.5, size = 18))  
+
 ```
 
 # Create heatmap for 2 page report
@@ -100,4 +166,3 @@ pdf(paste("../Figures/Pheatmap",".pdf", sep = ""),
 print(plt)
 dev.off()
 ```
-

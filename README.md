@@ -4,8 +4,10 @@ Class project for MIT's 20.440
 
 ## Overview
 This repo contains code to reproduce the differential gene expression analysis 
-heatmap from Christine D. and Bri K.'s 2-page proposal. In the future, this
-repository will contain all code associated with the 20.440 class project.
+heatmap from Christine D. and Bri K.'s 2-page proposal, as well as a few 
+additional exploratory figures (PCA plot, volcano plot for differential gene
+expression). In the future, this repository will contain all  code associated 
+with the 20.440 class project.
 
 ## Data
 Data used are publicly available and found in GEO at:
@@ -36,7 +38,18 @@ readr
 pheatmap
 dendsort
 viridis
+ggrepel
+ggplot2
+dplyr
+limma
 
-Use the command install.packages(c("readr", "pheatmap", "dendsort", "viridis"))
+Use the command install.packages(c("readr", "pheatmap", "dendsort", "viridis",
+"ggrepel","ggplot2","dplyr","limma"))
 
-Run the markdown file by clicking run in the upper righthand corner and selecting run all.
+Run the markdown file by clicking run in the upper righthand corner and 
+selecting run all.
+
+## Code
+Code for the volcano plot visualization is modeled after Mark Dunning's 
+2020 version of "Analysing Data from GEO- Work In Progress"
+https://sbc.shef.ac.uk/geo_tutorial/tutorial.nb.html
