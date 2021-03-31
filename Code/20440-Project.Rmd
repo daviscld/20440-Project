@@ -144,7 +144,7 @@ rownames(annotation_row) <- rownames(Xtmp)
 my_colors <- list(
   strain = c("WT" = '#8C02CC', "DKO" = '#5192C3'))
 
-#generate heatmap of log2 cpm count for top-50 differentially expressed genes,
+#generate heatmap of log2 cpm count for top-100 differentially expressed genes,
 #using sample color assignment, clustering columns and rows in previously sorted 
 #order from sort_hclust, breaks from previously defined mat_breaks,
 #and providing specific font,cell, and dedrogram (tree) sizes
