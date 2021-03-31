@@ -50,14 +50,20 @@ ID <- c("WT","WT","DKO","DKO")
 pca <- prcomp(X)
 
 ## Add sample info to PCs and plot
-as.data.frame(cbind(as.character(ID), pca$x)) %>%
-ggplot(aes(x = PC1, y=PC2, color=ID)) + 
+labeled_PCs <- as.data.frame(cbind(as.character(ID), pca$x))
+plt <- ggplot(labeled_PCs, aes(x = PC1, y=PC2, color=ID)) + 
   geom_point(shape = 19, size = 4) +
   ggtitle("PCA of WT vs DKO ABC Transcriptome") +
   theme_classic() +
   theme(axis.text.x = element_blank(), axis.text.y = element_blank(),
         axis.ticks = element_blank(), 
         plot.title = element_text(hjust=0.5, size = 18))
+
+#Print PCA to pdf
+pdf(paste("../Figures/PCA",".pdf", sep = ""), 
+    width = 8, height = 8) 
+print(plt)
+dev.off()
 
 ```
 
@@ -96,15 +102,21 @@ topN <- 20 #top N genes for annotation
 
 #Reformat full results to have additional variables of interest, filter for 
 #set parameters, plot volcano plot of DE and significance
-full_results %>% 
+full_results <- full_results %>% 
   mutate(Significant = adj.P.Val < p_cutoff, abs(logFC) > fc_cutoff ) %>% 
-  mutate(Rank = 1:n(), Label = ifelse(Rank < topN, colnames(counts),"")) %>% 
-  ggplot(aes(x = logFC, y = B, col=Significant,label=Label)) + geom_point() + 
+  mutate(Rank = 1:n(), Label = ifelse(Rank < topN, colnames(counts),""))
+plt <- ggplot(full_results, aes(x = logFC, y = B, col=Significant,label=Label)) + geom_point() + 
   geom_text_repel(col="black", max.overlaps = 30) +
   ggtitle("Differential Expression Analysis- WT vs DKO ABCs") +
   xlab("Log fold-change") + ylab("Log odds of differential expression") +
   theme_light() +
   theme(plot.title = element_text(hjust=0.5, size = 18))  
+
+#Print volano to pdf
+pdf(paste("../Figures/Volcano",".pdf", sep = ""), 
+    width = 10, height = 8) 
+print(plt)
+dev.off()
 
 ```
 
