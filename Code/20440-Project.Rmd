@@ -21,6 +21,9 @@ library(ggrepel)
 library(ggplot2)
 library(dplyr)
 library(limma)
+library(BiocManager)
+#BiocManager::install("biomaRt")
+library(dnapath)
 set.seed(1234)  # random seed for reproducibility
 ```
 
@@ -40,6 +43,28 @@ counts <- t(counts)
 #Z-score gene counts, create list of sample types
 X <- scale(counts, center = TRUE, scale = TRUE)
 ID <- c("WT","WT","DKO","DKO")
+
+#Repeat for human data
+hdata <- read.csv(file = '../Data/Human_SLE_Ctrl.csv')
+head(hdata)
+
+# Pull out gene names, counts (log2 cpm)
+hgenes <- hdata[,1:2]
+hcounts <- hdata[,4:ncol(hdata)]
+rownames(hcounts) <- hgenes[,1]
+hcounts <- t(hcounts)
+
+#Z-score gene counts, create list of sample types
+hX <- scale(hcounts, center = TRUE, scale = TRUE)
+
+#Name samples by disease state
+df_diagnosis <- data.frame(sample = rownames(hX))
+df_diagnosis$diagnosis <- rep(NA, length = nrow(df_diagnosis))
+df_diagnosis$diagnosis[which(grepl("HC", df_diagnosis$sample))] <- "Control"
+df_diagnosis$diagnosis[which(grepl("SLE", df_diagnosis$sample))] <- "SLE"
+hID <- df_diagnosis$diagnosis
+
+
 ```
 
 #PCA for visualization of samples
@@ -47,11 +72,11 @@ ID <- c("WT","WT","DKO","DKO")
 ```{r PCA}
 
 #Create pca model from Z-scored gene counts
-pca <- prcomp(X)
+pca <- prcomp(hX)
 
 ## Add sample info to PCs and plot
-labeled_PCs <- as.data.frame(cbind(as.character(ID), pca$x))
-plt <- ggplot(labeled_PCs, aes(x = PC1, y=PC2, color=ID)) + 
+labeled_PCs <- as.data.frame(cbind(as.character(hID), pca$x))
+plt <- ggplot(labeled_PCs, aes(x = PC1, y=PC2, color=hID)) + 
   geom_point(shape = 19, size = 4) +
   ggtitle("PCA of WT vs DKO ABC Transcriptome") +
   theme_classic() +
@@ -182,3 +207,72 @@ pdf(paste("../Figures/Pheatmap",".pdf", sep = ""),
 print(plt)
 dev.off()
 ```
+
+#Differential connectivity
+
+```{r Package loading}
+
+library(org.Hs.eg.db)
+BiocManager::install("org.Mm.eg.db")
+library(org.Mm.eg.db)
+library(githubinstall)
+githubinstall("dnapath")
+library(dnapath)
+BiocManager::install("reactome.db")
+BiocManager::install("minet")
+BiocManager::install("GENIE3")
+library(reactome.db)
+library(SeqNet)
+```
+
+``` {r DC analysis}
+#Convert gene names to Entrez IDs
+mouse_gene_names <- mapIds(org.Mm.eg.db, colnames(counts), 'ENTREZID', 'SYMBOL')
+human_gene_names <- colnames(hcounts)
+
+#Add entrez IDs to dataframe
+mouse_Entrez_genes <- data.frame(counts)
+colnames(mouse_Entrez_genes) <- mouse_gene_names
+human_Entrez_genes <- data.frame(hcounts)
+colnames(human_Entrez_genes) <- human_gene_names
+
+#Get reactome pathways represented within genes measured for both mouse & human
+react_paths_human <- get_reactome_pathways(species = "Homo sapiens")
+react_paths_mouse <- get_reactome_pathways(species = "Mus musculus")
+
+# Run dnapath using gene expression and group information for human data
+results_human <- dnapath(human_Entrez_genes, 
+                   pathway_list = react_paths_human, 
+                   groups = df_diagnosis$diagnosis,
+                   network_inference = run_pcor)
+
+results_mouse <- dnapath(mouse_Entrez_genes, 
+                   pathway_list = react_paths_mouse, 
+                   groups = ID,
+                   network_inference = run_corr)
+
+results_human <- filter_pathways(results_human, alpha_pathway = 0.05)
+results_mouse <- filter_pathways(results_mouse,alpha_pathway = 0.333) #limited by replicate number
+# Setting seed allows for reproducible work
+set.seed(123)
+results_mouse <- rename_genes(results_mouse, to = "symbol", species = "Mus musculus",
+                        dir_save = tempdir())
+results_human <- rename_genes(results_human, to = "symbol", species = "Homo Sapiens",
+                        dir_save = tempdir())
+
+# Extract the two estimated association networks for the first pathway
+nw <- get_networks(results_human[[1]])
+# Plot the networks using the SeqNet::plot_network function.
+
+# Plot the two networks (in separate plots)
+g <- SeqNet::plot_network(nw[[1]])
+SeqNet::plot_network(nw[[1]], compare_graph = g)
+# Plot of the differential network for pathway 1.
+# Use compare_graph to maintain same layout
+plot(results_human[[1]], compare_graph = g)
+
+# Investigate inflammasome and IFNG genes further
+plot_pair(results_human[[1]], "42386", "13837") #Inflammasome vs IFNG
+
+```
+
