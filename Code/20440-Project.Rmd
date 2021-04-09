@@ -27,7 +27,7 @@ library(dnapath)
 set.seed(1234)  # random seed for reproducibility
 ```
 
-#Download and clean data
+#Download and clean data !!!! SHOULD convert fpkm to tpm for final project
 
 ```{r GEO data from downloaded csv}
 # Import the data and look at the first six rows- gives data in log2 cpm
@@ -251,7 +251,7 @@ results_mouse <- dnapath(mouse_Entrez_genes,
                    groups = ID,
                    network_inference = run_corr)
 
-results_human <- filter_pathways(results_human, alpha_pathway = 0.05)
+results_human <- filter_pathways(results_human, alpha_pathway = 0.01)
 results_mouse <- filter_pathways(results_mouse,alpha_pathway = 0.333) #limited by replicate number
 # Setting seed allows for reproducible work
 set.seed(123)
@@ -260,8 +260,10 @@ results_mouse <- rename_genes(results_mouse, to = "symbol", species = "Mus muscu
 results_human <- rename_genes(results_human, to = "symbol", species = "Homo Sapiens",
                         dir_save = tempdir())
 
+plot(results_human[[100]])
+
 # Extract the two estimated association networks for the first pathway
-nw <- get_networks(results_human[[1]])
+nw <- get_networks(results_human[[100]])
 # Plot the networks using the SeqNet::plot_network function.
 
 # Plot the two networks (in separate plots)
@@ -271,8 +273,75 @@ SeqNet::plot_network(nw[[1]], compare_graph = g)
 # Use compare_graph to maintain same layout
 plot(results_human[[1]], compare_graph = g)
 
-# Investigate inflammasome and IFNG genes further
-plot_pair(results_human[[1]], "42386", "13837") #Inflammasome vs IFNG
+#Get dnapath_list format into dataframe for both mouse and human
+pathway <- list()
+genes <- list()
+dc_score <- list()
+pval <- list()
+mean_expr1 <- list()
+mean_expr2 <- list()
+
+for (path in 1:length(results_human))
+{
+  tmp <- summary(results_human[[path]], by_gene = TRUE)
+  pathway <- append(pathway, tmp$pathway)
+  genes <- append(genes, tmp$genes)
+  dc_score <- append(dc_score, tmp$dc_score)
+  pval <- append(pval, tmp$p_value)
+  mean_expr1 <- append(mean_expr1, tmp$mean_expr1)
+  mean_expr2 <- append(mean_expr2, tmp$mean_expr2)
+}
+
+df_human <- data.frame(pathway = unlist(pathway),
+                       genes = unlist(genes),
+                       dc_score = unlist(dc_score),
+                       pval = unlist(pval),
+                       mean_expr1 = unlist(mean_expr1),
+                       mean_expr2 = unlist(mean_expr2))
+
+pathway <- list()
+genes <- list()
+dc_score <- list()
+pval <- list()
+mean_expr1 <- list()
+mean_expr2 <- list()
+
+for (path in 1:length(results_mouse))
+{
+  tmp <- summary(results_mouse[[path]], by_gene = TRUE)
+  pathway <- append(pathway, tmp$pathway)
+  genes <- append(genes, tmp$genes)
+  dc_score <- append(dc_score, tmp$dc_score)
+  pval <- append(pval, tmp$p_value)
+  mean_expr1 <- append(mean_expr1, tmp$mean_expr1)
+  mean_expr2 <- append(mean_expr2, tmp$mean_expr2)
+}
+
+df_mouse <- data.frame(pathway = unlist(pathway),
+                       genes = unlist(genes),
+                       dc_score = unlist(dc_score),
+                       pval = unlist(pval),
+                       mean_expr1 = unlist(mean_expr1),
+                       mean_expr2 = unlist(mean_expr2))
+
+#Which pathways are differentially connected in both the mouse and human models?
+#Make sure they are in the same direction! ie control > or < SLE in BOTH
+
+higher_dc_mouse <- subset(df_mouse, mean_expr1 > mean_expr2)
+lower_dc_mouse <- subset(df_mouse, mean_expr1 < mean_expr2)
+higher_dc_human <- subset(df_human, mean_expr1 > mean_expr2)
+lower_dc_human <- subset(df_human, mean_expr1 < mean_expr2)
+
+high_overlap <- higher_dc_mouse[which(higher_dc_mouse$pathway %in% higher_dc_human$pathway),]
+low_overlap <- lower_dc_mouse[which(lower_dc_mouse$pathway %in% lower_dc_human$pathway),]
+overlap <- rbind(high_overlap, low_overlap)
+
+#Use Entrez IDs (column 2) from overlap pathways to identify GO and KEGG enriched pathways
+```
+
+#Use complex heatmap to overlay 4 heatmaps: 1) mouse DE genes, 2) human DE genes, 3) mouse DC genes (2 row, use mean expr 1 and mean expr 2 z-scored by column), 4) human DC genes (same as mouse)
+
+```{r Complex Heatmap}
 
 ```
 
