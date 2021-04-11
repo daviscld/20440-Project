@@ -24,6 +24,7 @@ library(limma)
 library(BiocManager)
 #BiocManager::install("biomaRt")
 library(dnapath)
+library(factoextra)
 set.seed(1234)  # random seed for reproducibility
 ```
 
@@ -39,6 +40,13 @@ genes <- data[,1]
 counts <- data[,7:10]
 rownames(counts) <- genes
 counts <- t(counts)
+rev_log2 <- function(x) {( 2^x ) }  #(--> change back to regular cpm)
+counts1 <- sapply(counts[1,],rev_log2)
+counts2 <- sapply(counts[2,],rev_log2)
+counts3 <- sapply(counts[3,],rev_log2)
+counts4 <- sapply(counts[4,],rev_log2)
+counts <- data.frame(rbind(counts1, counts2, counts3, counts4))
+rownames(counts) <- colnames(data[,7:10])
 
 #Z-score gene counts, create list of sample types
 X <- scale(counts, center = TRUE, scale = TRUE)
@@ -52,6 +60,11 @@ head(hdata)
 hgenes <- hdata[,1:2]
 hcounts <- hdata[,4:ncol(hdata)]
 rownames(hcounts) <- hgenes[,1]
+hcounts <- hcounts[-which(is.na(hgenes[,2])),]
+hgenes <- hgenes[-which(is.na(hgenes[,2])),]
+hcounts <- hcounts[-which(grepl("2-Mar",hgenes[,2])),]
+hgenes <- hgenes[-which(grepl("2-Mar",hgenes[,2])),]
+rownames(hcounts) <- hgenes[,2]
 hcounts <- t(hcounts)
 
 #Z-score gene counts, create list of sample types
@@ -70,25 +83,53 @@ hID <- df_diagnosis$diagnosis
 #PCA for visualization of samples
 
 ```{r PCA}
+#To run for mouse vs human, change X, ID (mouse) --> hX, hID (human)
 
 #Create pca model from Z-scored gene counts
 pca <- prcomp(hX)
 
 ## Add sample info to PCs and plot
-labeled_PCs <- as.data.frame(cbind(as.character(hID), pca$x))
-plt <- ggplot(labeled_PCs, aes(x = PC1, y=PC2, color=hID)) + 
-  geom_point(shape = 19, size = 4) +
-  ggtitle("PCA of WT vs DKO ABC Transcriptome") +
+labeled_PCs <- as.data.frame(cbind(as.factor(ID), pca$x))
+plt <- ggplot(labeled_PCs, aes(x = PC1, y=PC2, color=ID)) + 
+  geom_point(shape = 19, size = 10, alpha = 0.8) +
+  labs(title = "PCA of Mouse WT vs DKO ABC Transcriptomes",
+       x = "PC1", y = "PC2", color = "Disease State") +
+  scale_color_manual(values=c("DKO" = 'red', "WT" = 'cornflowerblue')) +
   theme_classic() +
-  theme(axis.text.x = element_blank(), axis.text.y = element_blank(),
+  theme(axis.text = element_blank(),
+        axis.title = element_text(size = 24),
         axis.ticks = element_blank(), 
-        plot.title = element_text(hjust=0.5, size = 18))
+        plot.title = element_text(hjust=0.5, size = 24),
+        legend.title = element_text(size = 18),
+        legend.text = element_text(size = 18))
 
 #Print PCA to pdf
-pdf(paste("../Figures/PCA",".pdf", sep = ""), 
-    width = 8, height = 8) 
+pdf(paste("../Figures/PCA_mouse",".pdf", sep = ""), 
+    width = 10, height = 10) 
 print(plt)
 dev.off()
+
+#What drives PCA separation for each?
+res.var <- get_pca_var(pca) #variance of pca explained by each PC
+# PC Contributions summed over first and second PC
+top_cont <- sort((abs(res.var$contrib[,1]) + abs(res.var$contrib[,2])),
+                 decreasing = TRUE) 
+top_cont
+
+#From top_cont, choose top-2 contributors and plot **DOESNT REALLY WORK, issue w using EntrezID to pull data
+p9 <- ggplot(as.data.frame(hX), aes(x=DCK, y = TNFAIP8)) +
+  geom_point(alpha = .35, size = 5, 
+             aes(fill = hID, color = hID)) +
+  labs(title = "Contribution of Top-2 Features to Diagnostic Separation") +
+  scale_color_manual(values=c("SLE" = 'red', "Control" = 'cornflowerblue')) +
+  theme_classic() +
+  theme(axis.text = element_text(size = 20),
+        axis.title = element_text(size = 24),
+        axis.ticks = element_blank(), 
+        plot.title = element_text(hjust=0.5, size = 24),
+        legend.title = element_text(size = 18),
+        legend.text = element_text(size = 18))
+p9
 
 ```
 
@@ -97,53 +138,103 @@ dev.off()
 ```{r Differential Expression}
 
 #Create identification matrix designating each sample as DKO or WT
-matrix <- model.matrix(~0+ID)
-colnames(matrix) <- c("DKO","WT")
+matrix_mouse <- model.matrix(~0+ID)
+matrix_human <- model.matrix(~0+hID)
+colnames(matrix_mouse) <- c("DKO","WT")
+colnames(matrix_human) <- c("Control","SLE")
 
 #Fit a linear model of gene counts by the design matrix, 
 #so each group is compared. Transpose cpm counts to align with design matrix.
-fit <- lmFit(t(counts), matrix)
+fit_human <- lmFit(t(hcounts), matrix_human)
+fit_mouse <- lmFit(t(counts), matrix_mouse)
 
 #makeContrasts takes expression specifying contrasts, returns contrast matrix
-contrasts <- makeContrasts(DKO - WT, levels=matrix)
+contrasts_mouse <- makeContrasts(DKO - WT, levels=matrix_mouse)
+contrasts_human <- makeContrasts(SLE - Control, levels=matrix_human)
 #Compute estimated coefficients from linear model fit, contrasts
-fit2 <- contrasts.fit(fit, contrasts)
+fit2_mouse <- contrasts.fit(fit_mouse, contrasts_mouse)
+fit2_human <- contrasts.fit(fit_human, contrasts_human)
 
 #Takes microarray linear fit model, returns t-statistics, F-statistics, and 
 #log-odds of differential expression using empirical Bayes' moderation
-fit2 <- eBayes(fit2)
+fit2_mouse <- eBayes(fit2_mouse)
+fit2_human <- eBayes(fit2_human)
 
 #Check how many genes are significantly over-expressed or under-expressed
 #between conditions, and which are equally expressed (~10% of genes are 
 #significantly diff. expressed)
-table(decideTests(fit2)) #returns # of over (+1) or under (-1) expressed genes
+table(decideTests(fit2_mouse)) #returns # of over (+1) or under (-1) expressed genes
+table(decideTests(fit2_human))
 #Get table of top-ranked genes, make gene names explicit variable
-full_results <- topTable(fit2, number=Inf, adjust.method="BH")
-full_results <- tibble::rownames_to_column(full_results,"ID")
+full_results_mouse <- topTable(fit2_mouse, number=Inf, adjust.method="BH")
+full_results_mouse <- tibble::rownames_to_column(full_results_mouse,"ID")
+full_results_human <- topTable(fit2_human, number=Inf, adjust.method="BH")
+full_results_human <- tibble::rownames_to_column(full_results_human,"ID")
 
-p_cutoff <- 0.01
+p_cutoff <- 0.05
 fc_cutoff <- 1
-topN <- 20 #top N genes for annotation
+topN <- 100 #top N genes for annotation
 
 #Reformat full results to have additional variables of interest, filter for 
 #set parameters, plot volcano plot of DE and significance
-full_results <- full_results %>% 
+full_results_human <- full_results_human %>% 
   mutate(Significant = adj.P.Val < p_cutoff, abs(logFC) > fc_cutoff ) %>% 
-  mutate(Rank = 1:n(), Label = ifelse(Rank < topN, colnames(counts),""))
-plt <- ggplot(full_results, aes(x = logFC, y = B, col=Significant,label=Label)) + geom_point() + 
-  geom_text_repel(col="black", max.overlaps = 30) +
-  ggtitle("Differential Expression Analysis- WT vs DKO ABCs") +
-  xlab("Log fold-change") + ylab("Log odds of differential expression") +
+  mutate(Rank = 1:n(), Label = ifelse(Rank < topN, ID,"")) %>%
+  mutate(logpval = -log10(adj.P.Val))
+full_results_mouse <- full_results_mouse %>% 
+  mutate(Significant = adj.P.Val < p_cutoff, abs(logFC) > fc_cutoff ) %>% 
+  mutate(Rank = 1:n(), Label = ifelse(Rank < topN, ID,"")) %>%
+  mutate(logpval = -log10(adj.P.Val))
+
+#Plot human or mouse volcano plots by switching title, full_results_(desired species)
+plt <- ggplot(full_results_human, aes(x = logFC, y = logpval, col=Significant,
+                                      label=Label)) + 
+  geom_point() + 
+  geom_text_repel(col="black", max.overlaps = 10) +
+  ggtitle("Differential Expression Analysis- Human Control vs SLE B Cells") +#WT vs DKO ABCs") + #
+  xlab("Log fold-change") + ylab("-log(p-value)") +
+  xlim(-50,50) + #ylim(-5, -1) +
   theme_light() +
   theme(plot.title = element_text(hjust=0.5, size = 18))  
 
 #Print volano to pdf
-pdf(paste("../Figures/Volcano",".pdf", sep = ""), 
+pdf(paste("../Figures/Volcano_Human",".pdf", sep = ""), 
     width = 10, height = 8) 
 print(plt)
 dev.off()
 
 ```
+#Which genes are differentially expressed in both mouse and human models of SLE?
+
+```{r DE overlaps}
+
+#Which pathways and genes are differentially expressed in both the mouse and human models?
+
+#Make sure they are in the same direction! ie control > or < SLE in BOTH
+#Both must also be significantly differentially expressed
+higher_de_mouse <- subset(full_results_mouse, logFC > 0 & Significant == TRUE)
+lower_de_mouse <- subset(full_results_mouse, logFC < 0 & Significant == TRUE)
+higher_de_human <- subset(full_results_human, logFC > 0 & Significant == TRUE)
+lower_de_human <- subset(full_results_human, logFC < 0 & Significant == TRUE)
+
+high_de_overlap <- higher_de_human[which(toupper(higher_de_mouse$ID) %in% higher_de_human$ID),]
+low_de_overlap <- lower_de_human[which(toupper(lower_de_mouse$ID) %in% lower_de_human$ID),]
+de_overlap <- rbind(high_de_overlap, low_de_overlap)
+
+#Use Entrez IDs (column 2) from overlap pathways to identify GO and KEGG enriched pathways
+human_gene_IDs <- mapIds(org.Hs.eg.db, de_overlap$ID, 'ENTREZID', 'SYMBOL')
+de_overlap$EntrezID <- human_gene_IDs
+
+# Convert GO terms in publicly available db to a list
+human_GO_terms <- org.Hs.egGO
+# Get the entrez gene identifiers that are mapped to a GO ID
+mapped_genes <- mappedkeys(human_GO_terms)
+# Convert to a list
+human_GO_list <- as.list(human_GO_terms[mapped_genes])
+
+
+```
+
 
 # Create heatmap for 2 page report
 
@@ -213,22 +304,25 @@ dev.off()
 ```{r Package loading}
 
 library(org.Hs.eg.db)
-BiocManager::install("org.Mm.eg.db")
+
+#BiocManager::install("org.Mm.eg.db")
+
 library(org.Mm.eg.db)
 library(githubinstall)
-githubinstall("dnapath")
+#githubinstall("dnapath")
 library(dnapath)
-BiocManager::install("reactome.db")
-BiocManager::install("minet")
-BiocManager::install("GENIE3")
+#BiocManager::install("reactome.db")
+#BiocManager::install("topGO")
 library(reactome.db)
 library(SeqNet)
+library(topGO)
+library(tidyverse)
 ```
 
 ``` {r DC analysis}
 #Convert gene names to Entrez IDs
 mouse_gene_names <- mapIds(org.Mm.eg.db, colnames(counts), 'ENTREZID', 'SYMBOL')
-human_gene_names <- colnames(hcounts)
+human_gene_names <- mapIds(org.Hs.eg.db, colnames(hcounts), 'ENTREZID', 'SYMBOL')
 
 #Add entrez IDs to dataframe
 mouse_Entrez_genes <- data.frame(counts)
@@ -275,69 +369,123 @@ plot(results_human[[1]], compare_graph = g)
 
 #Get dnapath_list format into dataframe for both mouse and human
 pathway <- list()
-genes <- list()
+edges <- list()
 dc_score <- list()
 pval <- list()
-mean_expr1 <- list()
-mean_expr2 <- list()
+nw1 <- list()
+nw2 <- list()
 
 for (path in 1:length(results_human))
 {
-  tmp <- summary(results_human[[path]], by_gene = TRUE)
+  tmp <- summary(results_human[[path]], by_gene = FALSE)
   pathway <- append(pathway, tmp$pathway)
-  genes <- append(genes, tmp$genes)
+  edges <- append(edges, tmp$edges)
   dc_score <- append(dc_score, tmp$dc_score)
   pval <- append(pval, tmp$p_value)
-  mean_expr1 <- append(mean_expr1, tmp$mean_expr1)
-  mean_expr2 <- append(mean_expr2, tmp$mean_expr2)
+  nw1 <- append(nw1, tmp$nw1)
+  nw2 <- append(nw2, tmp$nw2)
 }
 
 df_human <- data.frame(pathway = unlist(pathway),
-                       genes = unlist(genes),
+                       edges = unlist(edges),
                        dc_score = unlist(dc_score),
                        pval = unlist(pval),
-                       mean_expr1 = unlist(mean_expr1),
-                       mean_expr2 = unlist(mean_expr2))
+                       nw1 = unlist(nw1),
+                       nw2 = unlist(nw2))
 
 pathway <- list()
-genes <- list()
+edges <- list()
 dc_score <- list()
 pval <- list()
-mean_expr1 <- list()
-mean_expr2 <- list()
+nw1 <- list()
+nw2 <- list()
 
 for (path in 1:length(results_mouse))
 {
-  tmp <- summary(results_mouse[[path]], by_gene = TRUE)
+  tmp <- summary(results_mouse[[path]], by_gene = FALSE)
   pathway <- append(pathway, tmp$pathway)
-  genes <- append(genes, tmp$genes)
+  edges <- append(toupper(edges), tmp$edges)
   dc_score <- append(dc_score, tmp$dc_score)
   pval <- append(pval, tmp$p_value)
-  mean_expr1 <- append(mean_expr1, tmp$mean_expr1)
-  mean_expr2 <- append(mean_expr2, tmp$mean_expr2)
+  nw1 <- append(nw1, tmp$nw1)
+  nw2 <- append(nw2, tmp$nw2)
 }
 
 df_mouse <- data.frame(pathway = unlist(pathway),
-                       genes = unlist(genes),
+                       edges = unlist(edges),
                        dc_score = unlist(dc_score),
                        pval = unlist(pval),
-                       mean_expr1 = unlist(mean_expr1),
-                       mean_expr2 = unlist(mean_expr2))
+                       nw1 = unlist(nw1),
+                       nw2 = unlist(nw2))
 
 #Which pathways are differentially connected in both the mouse and human models?
+
 #Make sure they are in the same direction! ie control > or < SLE in BOTH
 
-higher_dc_mouse <- subset(df_mouse, mean_expr1 > mean_expr2)
-lower_dc_mouse <- subset(df_mouse, mean_expr1 < mean_expr2)
-higher_dc_human <- subset(df_human, mean_expr1 > mean_expr2)
-lower_dc_human <- subset(df_human, mean_expr1 < mean_expr2)
+higher_dc_mouse <- subset(df_mouse, nw1 > nw2)
+lower_dc_mouse <- subset(df_mouse, nw1 < nw2)
+higher_dc_human <- subset(df_human, nw1 > nw2)
+lower_dc_human <- subset(df_human, nw1 < nw2)
 
-high_overlap <- higher_dc_mouse[which(higher_dc_mouse$pathway %in% higher_dc_human$pathway),]
-low_overlap <- lower_dc_mouse[which(lower_dc_mouse$pathway %in% lower_dc_human$pathway),]
-overlap <- rbind(high_overlap, low_overlap)
+#Pull only differentially expressed genes out for each
+#higher_dc_mouse <- subset(higher_dc_mouse, pval < 0.35)
+#lower_dc_mouse <- subset(lower_dc_mouse, pval < 0.35)
+#higher_dc_human <- subset(higher_dc_human, pval < 0.05)
+#lower_dc_human <- subset(lower_dc_human, pval < 0.05)
+
+high_overlap <- higher_dc_human[which(higher_dc_human$edges %in% higher_dc_mouse$edges),]
+low_overlap <- lower_dc_human[which(lower_dc_human$edges %in% lower_dc_mouse$edges),]
+low_overlap$dc_score <- -(low_overlap$dc_score)
+human_overlap <- rbind(high_overlap, low_overlap)
+
+high_overlap <- higher_dc_mouse[which(higher_dc_mouse$edges %in% higher_dc_human$edges),]
+low_overlap <- lower_dc_mouse[which(lower_dc_mouse$edges %in% lower_dc_human$edges),]
+low_overlap$dc_score <- -(low_overlap$dc_score)
+mouse_overlap <- rbind(high_overlap, low_overlap)
+
 
 #Use Entrez IDs (column 2) from overlap pathways to identify GO and KEGG enriched pathways
 ```
+
+#DC Volcano plots
+
+```{r DC Volcano plots}
+#to plot human or mouse plots, change ggplot input human_overlap <-> mouse_overlap, and title
+p_cutoff <- 0.34
+dc_cutoff <- 0.1
+topN <- 20 #top N genes for annotation
+
+#Reformat full results to have additional variables of interest, filter for 
+#set parameters, plot volcano plot of DE and significance
+human_overlap <- human_overlap %>% 
+  mutate(Significant = pval < p_cutoff, abs(dc_score) > dc_cutoff ) %>% 
+  mutate(Rank = 1:n(), Label = ifelse(Rank < topN, edges,"")) %>%
+  mutate(logpval = -log10(pval))
+mouse_overlap <- mouse_overlap %>% 
+  mutate(Significant = pval < p_cutoff, abs(dc_score) > dc_cutoff ) %>% 
+  mutate(Rank = 1:n(), Label = ifelse(Rank < topN, edges,"")) %>%
+  mutate(logpval = -log10(pval))
+
+#Plot human or mouse volcano plots by switching title, full_results_(desired species)
+plt <- ggplot(mouse_overlap, aes(x = dc_score, y = logpval, col=Significant,
+                                      label=Label)) + 
+  geom_jitter(alpha = 0.35) + #change to geom_point for human
+  geom_text_repel(col="black", max.overlaps = 10) +
+  ggtitle("Differential Connectivity Analysis- WT vs DKO ABCs") + #Human Control vs SLE B Cells") +#
+  xlab("Differential Connectivity Score") + ylab("-log(p-value)") +
+  ylim(-.1,1) + #ylim(-5, -1) +
+  theme_light() +
+  theme(plot.title = element_text(hjust=0.5, size = 18))  
+
+#Print volano to pdf
+pdf(paste("../Figures/Volcano_DC_Mouse",".pdf", sep = ""), 
+    width = 10, height = 8) 
+print(plt)
+dev.off()
+
+
+```
+
 
 #Use complex heatmap to overlay 4 heatmaps: 1) mouse DE genes, 2) human DE genes, 3) mouse DC genes (2 row, use mean expr 1 and mean expr 2 z-scored by column), 4) human DC genes (same as mouse)
 
