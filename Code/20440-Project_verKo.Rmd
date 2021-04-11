@@ -1,0 +1,305 @@
+---
+title: "20440-Project"
+author: "Christine Davis, Bri Ko"
+date: "4/10/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+rm(list = ls()) #remove stored variables
+knitr::opts_chunk$set(echo = TRUE) #set knitr options
+```
+
+#Load packages
+
+```{r load, include=FALSE}
+library(readr)
+library(pheatmap)
+library(dendsort)
+library(viridis)
+library(ggrepel)
+library(ggplot2)
+library(dplyr)
+library(limma)
+library(BiocManager)
+#BiocManager::install("biomaRt")
+set.seed(1234)  # random seed for reproducibility
+```
+
+#Download and clean data
+
+```{r GEO data from downloaded csv}
+# Import the data and pull out gene names, counts (log2 cpm)
+mdata <- read.csv(file = '../Data/ABC_WT_DKO.csv')
+
+# Pull out gene names, counts (log2 cpm)
+mgenes <- mdata[,"genes"]
+cpm_cols <- c("WT_1_log2.cpm.","WT_2_log2.cpm.", 
+              "DKO_1_log2.cpm.","DKO_2_log2.cpm.")
+mcounts <- mdata[,cpm_cols]
+rownames(mcounts) <- mgenes
+mcounts <- t(mcounts) # samples x genes
+mcounts <- round(2^mcounts) # retrieve raw cpm values, rounding to nearest int
+
+# Standardize by gene expression, create list of sample types
+mX <- scale(mcounts, center = TRUE, scale = TRUE)
+mID <- sub("\\_.*", "", rownames(mX))
+
+# Repeat for human data
+hdata <- read.csv(file = '../Data/Human_SLE_Ctrl.csv')
+hgenes <- hdata[,c("ENTREZID","SYMBOL")]
+hcounts <- hdata[,4:ncol(hdata)]
+rownames(hcounts) <- hgenes[,1]
+hcounts <- t(hcounts) # samples x genes
+hcounts <- round(2^hcounts)
+hX <- scale(hcounts, center = TRUE, scale = TRUE)
+hID <- substr(rownames(hX),1,2)
+```
+
+#PCA for visualization of samples
+
+```{r PCA}
+#Create pca model from Z-scored gene counts
+mpca <- prcomp(mX)
+
+#Add sample info to PCs and plot
+mscores <- as.data.frame(cbind(mID, mpca$x))
+mplt <- ggplot(mscores, aes(x = PC1, y=PC2, color=mID)) + 
+  geom_point(shape = 19, size = 4) +
+  ggtitle("PCA of WT vs DKO ABC Transcriptome") +
+  theme_classic() +
+  theme(axis.text.x = element_blank(), axis.text.y = element_blank(),
+        axis.ticks = element_blank(), 
+        plot.title = element_text(hjust=0.5, size = 18))
+
+#Print PCA to pdf
+pdf(paste("../Figures/mPCA",".pdf", sep = ""), 
+    width = 8, height = 8) 
+print(mplt)
+dev.off()
+
+# Repeat for human samples
+hpca <- prcomp(hX)
+hscores <- as.data.frame(cbind(hID, hpca$x))
+hplt <- ggplot(hscores, aes(x = PC1, y=PC2, color=hID)) + 
+  geom_point(shape = 19, size = 4) +
+  ggtitle("PCA of Control vs SLE ABC Transcriptome") +
+  theme_classic() +
+  theme(axis.text.x = element_blank(), axis.text.y = element_blank(),
+        axis.ticks = element_blank(), 
+        plot.title = element_text(hjust=0.5, size = 18))
+
+#Print PCA to pdf
+pdf(paste("../Figures/hPCA",".pdf", sep = ""), 
+    width = 8, height = 8) 
+print(hplt)
+dev.off()
+
+```
+
+# Differential Expression Analysis ("DE") using EdgeR
+
+```{r Differential Expression}
+# https://www.bioconductor.org/packages/release/bioc/vignettes/edgeR/inst/doc/edgeRUsersGuide.pdf
+# BiocManager::install("edgeR")
+library(edgeR)
+mcnts <- round(2^mcounts) # retrieve raw cpm values, rounding to nearest int
+my <- DGEList(counts=t(mcnts), group=mID)
+keep <- filterByExpr(my) # filter out lowly expressed genes (?)
+my <- my[keep,,keep.lib.sizes=FALSE]
+my <- calcNormFactors(my)
+mdesign <- model.matrix(~mID)
+my <- estimateDisp(my,mdesign)
+
+# Find DEGs
+p_cutoff <- 0.01
+fc_cutoff <- 1
+topNPerc <- 0.20 #top N% of genes for annotation
+topN <- 20 #round(topNPerc*ncol(mcnts))
+et <- exactTest(my)
+degs <- topTags(et, n=topN, sort.by = "logFC", p.value=p_cutoff)
+
+```
+
+# Create heatmap for 2 page report
+
+```{r Heatmap}
+
+#Temporarily only use top-100 most significant differentially expressed genes
+Xtmp <- X[,1:100]
+
+#Cluster genes using hierarchical clustering with average Euclidean distance
+order_cluster_cols <- hclust(dist(t(Xtmp)), method="average")
+
+#Define sorting function to sort dendrogram/clustering distances by magnitude
+sort_hclust <- function(...) as.hclust(dendsort(as.dendrogram(...)))
+
+#Sort columns and rows according to sorting function
+mat_cluster_cols <- sort_hclust(order_cluster_cols)
+mat_cluster_rows <- sort_hclust(hclust(dist(X)))
+
+#Define quantile_breaks function to take given matrix, split into 10 equal
+#pieces, and return break locations. This will be used to color the heatmap
+#with each color representing 10% of the data, to distinguish deciles
+quantile_breaks <- function(xs, n = 10) {
+  breaks <- quantile(xs, probs = seq(0, 1, length.out = n), na.rm = TRUE)
+  breaks[!duplicated(breaks)]
+}
+
+#Use break function to create breaks in gene expression data 
+mat_breaks <- quantile_breaks(Xtmp, n = 10)
+
+#Label heatmap rows with sample type, columns with gene names
+annotation_row = data.frame(strain = ID)
+rownames(annotation_row) <- rownames(Xtmp)
+
+#Provide colors for sample types
+my_colors <- list(
+  strain = c("WT" = '#8C02CC', "DKO" = '#5192C3'))
+
+#generate heatmap of log2 cpm count for top-100 differentially expressed genes,
+#using sample color assignment, clustering columns and rows in previously sorted 
+#order from sort_hclust, breaks from previously defined mat_breaks,
+#and providing specific font,cell, and dedrogram (tree) sizes
+
+plt <- pheatmap(Xtmp, color = viridis(9), 
+         annotation_colors = my_colors, 
+         annotation_row = annotation_row, 
+         cellwidth = 8, 
+         cellheight = 18, 
+         fontsize = 12, 
+         border_color = "grey", 
+         treeheight_row = 3, 
+         treeheight_col = 12,
+         breaks = mat_breaks,
+         cluster_cols = mat_cluster_cols,
+         cluster_rows = mat_cluster_rows,
+         cex = 0.7
+         )
+
+#Print heatmap to pdf
+pdf(paste("../Figures/Pheatmap",".pdf", sep = ""), 
+    width = 20, height = 8) 
+print(plt)
+dev.off()
+```
+
+
+# Create volcano plot
+```{r volcano}
+res <- et$table %>% 
+  mutate(Significant = PValue < p_cutoff, abs(logFC) > fc_cutoff ) %>%
+  mutate(Rank = 1:n(), Label = ifelse(Rank < topN, rownames(et$table),""))
+  
+volcPlt <- ggplot(res, aes(x = logFC, y = -log2(PValue), col=Significant, label=Label)) + 
+  geom_point() +
+  geom_text_repel(col="black", max.overlaps = 30) +
+  ggtitle("Differential Expression Analysis- WT vs DKO ABCs") +
+  xlab("Log fold-change") + ylab("Log odds of differential expression") +
+  theme_light() +
+  theme(plot.title = element_text(hjust=0.5, size = 18))
+
+#Print volcano to pdf
+pdf(paste("../Figures/Volcano",".pdf", sep = ""), 
+    width = 10, height = 8) 
+print(plt)
+dev.off()
+```
+#Differential connectivity
+
+```{r Package loading}
+library(org.Hs.eg.db)
+# BiocManager::install("org.Mm.eg.db")
+library(org.Mm.eg.db)
+# library(githubinstall)
+# githubinstall("dnapath")
+# install.packages("dnapath")
+library(dnapath)
+# BiocManager::install("reactome.db")
+# BiocManager::install("minet")
+# BiocManager::install("GENIE3")
+library(reactome.db)
+library(SeqNet)
+```
+
+``` {r DC analysis}
+#Convert gene names to Entrez IDs
+mGeneNames <- mapIds(org.Mm.eg.db, colnames(mcounts), 'ENTREZID', 'SYMBOL')
+# hGeneNames <- mapIds(org.Hs.eg.db, colnames(hcounts), 'SYMBOL', 'ENTREZID')
+
+#Add entrez IDs to dataframe
+mEntrez <- data.frame(mcounts)
+colnames(mEntrez) <- mGeneNames
+# hEntrez <- hcounts
+
+#Get reactome pathways represented within genes measured for both mouse & human
+react_paths_mouse <- get_reactome_pathways(species = "Mus musculus")
+# react_paths_human <- get_reactome_pathways(species = "Homo sapiens")
+
+# Run dnapath using gene expression and group information for human data
+mres <- dnapath(mEntrez, 
+                pathway_list = react_paths_mouse, 
+                groups = mID,
+                network_inference = run_corr,
+                seed = 123)
+plot(mres[[1]]) #  Plot of the differential network for pathway 1 (LDL clearance)
+
+# Filter and order pathways
+# mres2 <- filter_pathways(mres, alpha_pathway = 0.7) # filter out pathways above threshold. min is 0.667
+# top_mres <- sort(mres2, by = "dc_score") # sort pathways by DC score
+# top_mres_df <- data.frame(summary(top_mres))
+
+# Plot a pathway's gene network
+set.seed(123)
+mres <- rename_genes(mres, to = "symbol", species = "Mus musculus",
+                     dir_save = tempdir())
+mpath1NW <- plot(mres[[1]], main="LDL clearance pathway")
+
+# Plot gene pair association (prolly more helpful for human data cuz more samples)
+summary(mres[[1]], by_gene = FALSE, alpha = 0.7)
+plot_pair(mres, "Lipa", "Npc1")
+
+#Print to pdf
+pdf(paste("../Figures/mus_LDLclear",".pdf", sep = ""), width = 10, height = 8) 
+print(mpath1NW)
+dev.off()
+```
+```{r network stuff}
+# Extract the two estimated association networks for the first pathway
+m_nw1 <- get_networks(mres[[1]])
+
+# Plot the networks using the SeqNet::plot_network function.
+# Plot the two networks (in separate plots)
+m_g1 <- SeqNet::plot_network(m_nw1[[1]])
+SeqNet::plot_network(m_nw1[[1]], compare_graph = m_g1)
+
+# Plot of the differential network for pathway 1.
+# Use compare_graph to maintain same layout
+plot(mres[[1]], compare_graph = m_g1)
+
+#Get dnapath_list format into dataframe for both mouse and human
+pathway <- list()
+edges <- list()
+dc_score <- list()
+pval <- list()
+nw1 <- list()
+nw2 <- list()
+
+for (path in 1:length(mres))
+{
+  tmp <- summary(mres[[path]], by_gene = FALSE)
+  pathway <- append(pathway, tmp$pathway)
+  edges <- append(edges, tmp$edges)
+  dc_score <- append(dc_score, tmp$dc_score)
+  pval <- append(pval, tmp$p_value)
+  nw1 <- append(nw1, tmp$nw1)
+  nw2 <- append(nw2, tmp$nw2)
+}
+mDf <- data.frame(pathway = unlist(pathway),
+                  edges = unlist(edges),
+                  dc_score = unlist(dc_score),
+                  pval = unlist(pval),
+                  nw1 = unlist(nw1),
+                  nw2 = unlist(nw2))
+
+```
