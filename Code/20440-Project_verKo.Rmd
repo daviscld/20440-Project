@@ -45,13 +45,13 @@ mcounts <- round(2^mcounts) # retrieve raw cpm values, rounding to nearest int
 mX <- scale(mcounts, center = TRUE, scale = TRUE)
 mID <- sub("\\_.*", "", rownames(mX))
 
-# Repeat for human data
+# Repeat for human data (in fpkm! raw counts = fpkm*transcipt_length...)
 hdata <- read.csv(file = '../Data/Human_SLE_Ctrl.csv')
 hgenes <- hdata[,c("ENTREZID","SYMBOL")]
 hcounts <- hdata[,4:ncol(hdata)]
 rownames(hcounts) <- hgenes[,1]
 hcounts <- t(hcounts) # samples x genes
-hcounts <- round(2^hcounts)
+# hcounts <- round(2^hcounts)
 hX <- scale(hcounts, center = TRUE, scale = TRUE)
 hID <- substr(rownames(hX),1,2)
 ```
@@ -99,12 +99,11 @@ dev.off()
 
 # Differential Expression Analysis ("DE") using EdgeR
 
-```{r Differential Expression}
+```{r Differential Expression, GO enrichment}
 # https://www.bioconductor.org/packages/release/bioc/vignettes/edgeR/inst/doc/edgeRUsersGuide.pdf
 # BiocManager::install("edgeR")
 library(edgeR)
-mcnts <- round(2^mcounts) # retrieve raw cpm values, rounding to nearest int
-my <- DGEList(counts=t(mcnts), group=mID)
+my <- DGEList(counts=t(mcounts), group=mID)
 keep <- filterByExpr(my) # filter out lowly expressed genes (?)
 my <- my[keep,,keep.lib.sizes=FALSE]
 my <- calcNormFactors(my)
@@ -115,10 +114,76 @@ my <- estimateDisp(my,mdesign)
 p_cutoff <- 0.01
 fc_cutoff <- 1
 topNPerc <- 0.20 #top N% of genes for annotation
-topN <- 20 #round(topNPerc*ncol(mcnts))
-et <- exactTest(my)
-degs <- topTags(et, n=topN, sort.by = "logFC", p.value=p_cutoff)
+topN <- round(topNPerc*ncol(mcounts))
+met <- exactTest(my)
+mdegs <- topTags(met, n=topN, sort.by = "logFC", p.value=p_cutoff)
 
+# GO enrichment of DEGs
+# documentation: https://www.bioconductor.org/packages/devel/bioc/vignettes/topGO/inst/doc/topGO.pdf
+# walkthru: https://ucdavis-bioinformatics-training.github.io/2018-June-RNA-Seq-Workshop/friday/enrichment.html
+library(topGO)
+mgeneList <- data.frame(mdegs)$PValue
+names(mgeneList) <- rownames(mdegs)
+mGOdata <- new("topGOdata",
+               ontology = "BP",
+               allGenes = mgeneList,
+               geneSelectionFun = function(x)x, # should be used to select for significant genes?
+               annot = annFUN.org, 
+               mapping = "org.Mm.eg.db",
+               ID = "SYMBOL")
+
+# Fisher and Kolmogorov-Smirnov enrichment tests
+resultFisher <- runTest(mGOdata, algorithm = "classic", statistic = "fisher")
+resultKS <- runTest(mGOdata, algorithm = "classic", statistic = "ks")
+resultKS.elim <- runTest(mGOdata, algorithm = "elim", statistic = "ks")
+mallRes <- GenTable(mGOdata, classicFisher = resultFisher,
+                    classicKS = resultKS, elimKS = resultKS.elim,
+                    orderBy = "elimKS", ranksOf = "classicFisher", topNodes = 10)
+
+# Visualize GO term distribution over GO graph; manually saved from Rstudio
+library(Rgraphviz)
+mGOgraph <- showSigOfNodes(mGOdata, score(resultKS.elim), firstSigNodes = 5, useInfo = 'all')
+
+# Save results table to pdf
+library(gridExtra)
+pdf("../Figures/mouseGOenrich.pdf", height = nrow(mallRes), width = 1.5*ncol(mallRes))
+grid.table(mallRes)
+dev.off()
+
+# Repeat for human data; USED FPKM VALUES AS IS
+hy <- DGEList(counts=t(hcounts), group=hID)
+keep <- filterByExpr(hy) # filter out lowly expressed genes (?)
+hy <- hy[keep,,keep.lib.sizes=FALSE]
+hy <- calcNormFactors(hy)
+hdesign <- model.matrix(~hID)
+hy <- estimateDisp(hy,hdesign)
+
+topN <- round(topNPerc*ncol(hcounts))
+het <- exactTest(hy)
+hdegs <- topTags(het, n=topN, sort.by = "logFC", p.value=p_cutoff)
+
+hgeneList <- data.frame(hdegs)$PValue
+names(hgeneList) <- rownames(hdegs)
+hGOdata <- new("topGOdata",
+               ontology = "BP",
+               allGenes = hgeneList,
+               geneSelectionFun = function(x)x, # NEEDS TO BE REVISITED
+               annot = annFUN.org, 
+               mapping = "org.Hs.eg.db",
+               ID = "ENTREZ")
+
+# Kolmogorov-Smirnov testing
+resultFisher <- runTest(hGOdata, algorithm = "classic", statistic = "fisher")
+resultKS <- runTest(hGOdata, algorithm = "classic", statistic = "ks")
+resultKS.elim <- runTest(hGOdata, algorithm = "elim", statistic = "ks")
+hallRes <- GenTable(hGOdata, classicFisher = resultFisher,
+                    classicKS = resultKS, elimKS = resultKS.elim,
+                    orderBy = "elimKS", ranksOf = "classicFisher", topNodes = 10)
+
+# Save results table to pdf
+pdf("../Figures/humanGOenrich.pdf", height = nrow(hallRes), width = 1.5*ncol(hallRes))
+grid.table(hallRes)
+dev.off()
 ```
 
 # Create heatmap for 2 page report
