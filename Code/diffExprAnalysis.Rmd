@@ -1,0 +1,200 @@
+---
+title: "Differential Expression Analysis"
+author: "Bri Ko"
+date: "4/11/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Load packages
+
+```{r load, include=FALSE}
+library(readr)
+library(dplyr) # for %<% mutating
+library(ggplot2) # for plotting
+library(ggrepel) # for plot text spacing
+library(Rgraphviz) # for visualizing GO graphs
+library(gridExtra) # for printing table as pdf
+library(limma)
+library(edgeR)
+library(topGO)
+set.seed(1234)  # random seed for reproducibility
+```
+
+# Download and clean data
+
+```{r GEO data from downloaded csv}
+### Mouse data
+# Import the data and pull out gene names, counts (log2 cpm)
+mdata <- read.csv(file = '../Data/ABC_WT_DKO.csv')
+
+# Pull out gene names, counts (log2 cpm)
+mgenes <- mdata[,"genes"]
+mgenes <- mgenes[complete.cases(mgenes)]
+cpm_cols <- c("WT_1_log2.cpm.","WT_2_log2.cpm.", 
+              "DKO_1_log2.cpm.","DKO_2_log2.cpm.")
+mcounts <- mdata[mdata$genes %in% mgenes, cpm_cols]
+rownames(mcounts) <- mgenes
+mcounts <- t(mcounts) # samples x genes
+mcounts <- 2^mcounts # retrieve raw cpm values; ROUND TO NEAREST INT?
+mID <- sub("\\_.*", "", rownames(mcounts)) # list of sample ptypes
+
+### Repeat for human data (in fpkm! raw counts = fpkm*transcipt_length...)
+hdata <- read.csv(file = '../Data/Human_SLE_Ctrl.csv')
+hgenes <- hdata[,c("ENTREZID","SYMBOL")]
+hgenes <- hgenes[complete.cases(hgenes),]
+hcounts <- hdata[hdata$ENTREZID %in% hgenes$ENTREZID,4:ncol(hdata)]
+rownames(hcounts) <- hgenes[,1]
+hcounts <- t(hcounts) # samples x genes
+hID <- sub("\\..*", "", rownames(hcounts))
+```
+
+# Differential Expression Analysis ("DE") using EdgeR
+
+```{r Differential Expression, GO enrichment}
+# https://www.bioconductor.org/packages/release/bioc/vignettes/edgeR/inst/doc/edgeRUsersGuide.pdf
+# BiocManager::install("edgeR")
+### Criteria for DEG
+p_cutoff <- 0.05
+fc_cutoff <- 1
+topNPerc <- 0.20 # top N% of genes for annotation
+
+### Mouse DE analysis
+my <- DGEList(counts=t(mcounts), group=mID)
+keep <- filterByExpr(my) # filter out lowly expressed genes (?)
+my <- my[keep,,keep.lib.sizes=FALSE]
+my <- calcNormFactors(my)
+mdesign <- model.matrix(~mID)
+my <- estimateDisp(my,mdesign)
+
+# Find DEGs
+topN <- round(topNPerc*ncol(mcounts))
+met <- exactTest(my)
+mdegs <- topTags(met, n=topN, sort.by = "logFC", p.value=p_cutoff)
+
+### Human DE analysis
+hy <- DGEList(counts=t(hcounts), group=hID)
+keep <- filterByExpr(hy) # filter out lowly expressed genes (?)
+hy <- hy[keep,,keep.lib.sizes=FALSE]
+hy <- calcNormFactors(hy)
+hdesign <- model.matrix(~hID)
+hy <- estimateDisp(hy,hdesign)
+
+topN <- round(topNPerc*ncol(hcounts))
+het <- exactTest(hy)
+hdegs <- topTags(het, n=topN, sort.by = "logFC", p.value=p_cutoff)
+```
+# Differential Expression Analysis ("DE")
+
+```{r Differential Expression}
+#Create identification matrix designating each sample as DKO or WT
+matrix_mouse <- model.matrix(~0+mID)
+matrix_human <- model.matrix(~0+hID)
+colnames(matrix_mouse) <- c("DKO","WT")
+colnames(matrix_human) <- c("Control","SLE")
+#Fit a linear model of gene counts by the design matrix, 
+#so each group is compared. Transpose cpm counts to align with design matrix.
+fit_human <- lmFit(t(hcounts), matrix_human)
+fit_mouse <- lmFit(t(mcounts), matrix_mouse)
+#makeContrasts takes expression specifying contrasts, returns contrast matrix
+contrasts_mouse <- makeContrasts(DKO - WT, levels=matrix_mouse)
+contrasts_human <- makeContrasts(SLE - Control, levels=matrix_human)
+#Compute estimated coefficients from linear model fit, contrasts
+fit2_mouse <- contrasts.fit(fit_mouse, contrasts_mouse)
+fit2_human <- contrasts.fit(fit_human, contrasts_human)
+#Takes microarray linear fit model, returns t-statistics, F-statistics, and 
+#log-odds of differential expression using empirical Bayes' moderation
+fit2_mouse <- eBayes(fit2_mouse)
+fit2_human <- eBayes(fit2_human)
+#Check how many genes are significantly over-expressed or under-expressed
+#between conditions, and which are equally expressed (~10% of genes are 
+#significantly diff. expressed)
+table(decideTests(fit2_mouse)) #returns # of over (+1) or under (-1) expressed genes
+table(decideTests(fit2_human))
+#Get table of top-ranked genes, make gene names explicit variable
+full_results_mouse <- topTable(fit2_mouse, number=Inf, adjust.method="BH")
+full_results_mouse <- tibble::rownames_to_column(full_results_mouse,"ID")
+full_results_human <- topTable(fit2_human, number=Inf, adjust.method="BH")
+full_results_human <- tibble::rownames_to_column(full_results_human,"ID")
+p_cutoff <- 0.05
+fc_cutoff <- 1
+topN <- 100 #top N genes for annotation
+#Reformat full results to have additional variables of interest, filter for 
+#set parameters, plot volcano plot of DE and significance
+full_results_human <- full_results_human %>% 
+  mutate(Significant = adj.P.Val < p_cutoff, abs(logFC) > fc_cutoff ) %>% 
+  mutate(Rank = 1:n(), Label = ifelse(Rank < topN, ID,"")) %>%
+  mutate(logpval = -log10(adj.P.Val))
+full_results_mouse <- full_results_mouse %>% 
+  mutate(Significant = adj.P.Val < p_cutoff, abs(logFC) > fc_cutoff ) %>% 
+  mutate(Rank = 1:n(), Label = ifelse(Rank < topN, ID,"")) %>%
+  mutate(logpval = -log10(adj.P.Val))
+
+### Compare two methods of DE analysis
+# 4391 genes vs 2254 (Ko); 2022 in common
+davis_hdegs <- full_results_human$ID[which(full_results_human$Significant==TRUE)] 
+
+# 431 genes vs 834 (Ko); 368 in common
+davis_mdegs <- full_results_mouse$ID[which(full_results_mouse$Significant==TRUE)] 
+```
+
+# GO Enrichment of DEGs using topGO
+``` {GO enrichment}
+# GO enrichment of DEGs
+# documentation: https://www.bioconductor.org/packages/devel/bioc/vignettes/topGO/inst/doc/topGO.pdf
+# walkthru: https://ucdavis-bioinformatics-training.github.io/2018-June-RNA-Seq-Workshop/friday/enrichment.html
+# mgeneList <- data.frame(mdegs)$PValue
+# names(mgeneList) <- rownames(mdegs)
+mgeneList <- full_results_mouse$'P.Value'
+names(mgeneList) <- full_results_mouse$ID
+mGOdata <- new("topGOdata",
+               ontology = "BP",
+               allGenes = mgeneList,
+               geneSelectionFun = function(x)x, # should be used to select for significant genes?
+               annot = annFUN.org, 
+               mapping = "org.Mm.eg.db",
+               ID = "SYMBOL")
+
+# Fisher and Kolmogorov-Smirnov enrichment tests
+resultFisher <- runTest(mGOdata, algorithm = "classic", statistic = "fisher")
+resultKS <- runTest(mGOdata, algorithm = "classic", statistic = "ks")
+resultKS.elim <- runTest(mGOdata, algorithm = "elim", statistic = "ks")
+mallRes <- GenTable(mGOdata, classicFisher = resultFisher,
+                    classicKS = resultKS, elimKS = resultKS.elim,
+                    orderBy = "elimKS", ranksOf = "classicFisher", topNodes = 10)
+
+# Visualize GO term distribution over GO graph; manually saved from Rstudio
+mGOgraph <- showSigOfNodes(mGOdata, score(resultKS.elim), firstSigNodes = 5, useInfo = 'all')
+
+# Save results table to pdf
+pdf("../Figures/mouseGOenrich.pdf", height = nrow(mallRes), width = 1.5*ncol(mallRes))
+grid.table(mallRes)
+dev.off()
+
+# Repeat for human data; USED FPKM VALUES AS IS
+hgeneList <- data.frame(hdegs)$PValue
+names(hgeneList) <- rownames(hdegs)
+hGOdata <- new("topGOdata",
+               ontology = "BP",
+               allGenes = hgeneList,
+               geneSelectionFun = function(x)x, # NEEDS TO BE REVISITED
+               annot = annFUN.org, 
+               mapping = "org.Hs.eg.db",
+               ID = "ENTREZ")
+
+# Kolmogorov-Smirnov testing
+resultFisher <- runTest(hGOdata, algorithm = "classic", statistic = "fisher")
+resultKS <- runTest(hGOdata, algorithm = "classic", statistic = "ks")
+resultKS.elim <- runTest(hGOdata, algorithm = "elim", statistic = "ks")
+hallRes <- GenTable(hGOdata, classicFisher = resultFisher,
+                    classicKS = resultKS, elimKS = resultKS.elim,
+                    orderBy = "elimKS", ranksOf = "classicFisher", topNodes = 10)
+
+# Save results table to pdf
+pdf("../Figures/humanGOenrich.pdf", height = nrow(hallRes), width = 1.5*ncol(hallRes))
+grid.table(hallRes)
+dev.off()
+```
