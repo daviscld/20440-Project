@@ -1,0 +1,149 @@
+---
+title: "Load, clean, visualize data (PCA, heatmap)"
+author: "Bri Ko"
+date: "4/12/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Load packages
+
+```{r load, include=FALSE}
+library(readr)
+library(dplyr) # for %<% mutating
+library(ggplot2) # for plotting
+library(ggrepel) # for plot text spacing
+library(Rgraphviz) # for visualizing GO graphs
+library(gridExtra) # for printing table as pdf
+library(limma) 
+set.seed(1234)  # random seed for reproducibility
+```
+
+# Functions (had to manually run)
+
+``` {r Useful functions}
+pca_plot <- function(X, ID, plt_title) {
+  ### Input:
+  #     X: normalized count data (samples x genes) to perform PCA on
+  #     ID: list of sample ptypes
+  #     plt_title: plot title
+  
+  ### Output:
+  #     pca: prcomp(X) output
+  #     pca_plt: pca plot
+  #     var_plt: % var for each PC plot (or Scree plot?)
+  
+  # Create pca model from Z-scored gene counts
+  pca <- prcomp(X)
+  
+  # Add sample info to loadings matrix and plot
+  ID_factor <- factor(ID)
+  scores <- data.frame(ID_factor, pca$x)
+  pca_plt <- ggplot(scores, aes(x = PC1, y = PC2, color = ID_factor)) + 
+    geom_point(shape = 19, size = 4) +
+    labs(title = plt_title, 
+         x = "PC1", 
+         y = "PC2", 
+         color = "Disease State") +
+    scale_color_manual(values=c("red", "cornflowerblue")) +
+    theme_classic() +
+    theme(axis.text = element_blank(),
+          axis.title = element_text(size = 24),
+          axis.ticks = element_blank(), 
+          plot.title = element_text(hjust=0.5, size = 24),
+          legend.title = element_text(size = 18),
+          legend.text = element_text(size = 18))
+  
+  # Plot variance of each PC
+  eigs <- pca$sdev^2
+  var <- eigs/sum(eigs)
+  cumvar <- cumsum(var)
+  pcs <- factor(colnames(pca$x), levels=colnames(pca$x))
+  var_df <- data.frame(pcs, var)
+  var_plt <- ggplot(data=var_df[1:10,], aes(x=pcs, y=var)) +
+    geom_bar(stat="identity")
+  
+  # Combine outputs into a list
+  res <- list(pca, pca_plt, var_plt)
+  return(res)
+}
+```
+
+# Download and clean data
+
+```{r GEO data from downloaded csv}
+### Mouse data
+# Import the data and pull out gene names, counts (log2 cpm)
+mdata <- read.csv(file = '../Data/ABC_WT_DKO.csv')
+mgenes <- mdata[,"genes"]
+mgenes <- mgenes[complete.cases(mgenes)]
+cpm_cols <- c("WT_1_log2.cpm.","WT_2_log2.cpm.", 
+              "DKO_1_log2.cpm.","DKO_2_log2.cpm.")
+mcounts <- mdata[mdata$genes %in% mgenes, cpm_cols]
+rownames(mcounts) <- mgenes
+mcounts <- t(mcounts) # samples x genes
+mcounts <- 2^mcounts # retrieve raw cpm values
+mID <- sub("\\_.*", "", rownames(mcounts)) # list of sample ptypes
+mX <- scale(mcounts, center = TRUE, scale = TRUE) # normalized count data
+
+### Repeat for human data (in fpkm! raw counts = fpkm*transcipt_length...)
+hdata <- read.csv(file = '../Data/Human_SLE_Ctrl.csv')
+hgenes <- hdata[,c("ENTREZID","SYMBOL")]
+hgenes <- hgenes[complete.cases(hgenes),]
+hcounts <- hdata[hdata$ENTREZID %in% hgenes$ENTREZID,4:ncol(hdata)]
+hcounts <- hcounts[-which(grepl("2-Mar",hgenes[,2])),]
+hgenes <- hgenes[-which(grepl("2-Mar",hgenes[,2])),]
+rownames(hcounts) <- hgenes[,1]
+hcounts <- t(hcounts)
+hID <- sub("\\..*", "", rownames(hcounts))
+hX <- scale(hcounts, center = TRUE, scale = TRUE)
+
+### Save the count matrices as a data piece?
+```
+
+# PCA for visualization of samples
+
+```{r PCA}
+### PCA on mouse data
+mres <- pca_plot(mX, mID, "PCA of Mouse WT vs DKO ABC Transcriptomes")
+mpca <- mres[[1]]
+mplt <- mres[[2]]
+mvar_plt <- mres[[3]]
+
+### PCA on human data
+hres <- pca_plot(hX, hID, "PCA of Human Control vs SLE ABC Transcriptomes")
+hpca <- hres[[1]]
+hplt <- hres[[2]]
+hvar_plt <- hres[[3]]
+
+### Save plots to pdfs
+# Mouse plots
+pdf(paste("../Figures/mPCA",".pdf", sep = ""), 
+    width = 10, height = 10) 
+print(mplt)
+dev.off()
+
+pdf(paste("../Figures/mPCA_var",".pdf", sep = ""), 
+    width = 10, height = 10) 
+print(mvar_plt)
+dev.off()
+
+# Human plots
+pdf(paste("../Figures/hPCA",".pdf", sep = ""), 
+    width = 10, height = 10) 
+print(hplt)
+dev.off()
+
+pdf(paste("../Figures/hPCA_var",".pdf", sep = ""), 
+    width = 10, height = 10) 
+print(hvar_plt)
+dev.off()
+```
+
+# Heatmap
+
+```{r heatmap}
+```

@@ -27,11 +27,10 @@ set.seed(1234)  # random seed for reproducibility
 # Download and clean data
 
 ```{r GEO data from downloaded csv}
+# same as PCA_heatmap.Rmd code w/o normalized counts (e.g. mX, hX)
 ### Mouse data
 # Import the data and pull out gene names, counts (log2 cpm)
 mdata <- read.csv(file = '../Data/ABC_WT_DKO.csv')
-
-# Pull out gene names, counts (log2 cpm)
 mgenes <- mdata[,"genes"]
 mgenes <- mgenes[complete.cases(mgenes)]
 cpm_cols <- c("WT_1_log2.cpm.","WT_2_log2.cpm.", 
@@ -39,7 +38,7 @@ cpm_cols <- c("WT_1_log2.cpm.","WT_2_log2.cpm.",
 mcounts <- mdata[mdata$genes %in% mgenes, cpm_cols]
 rownames(mcounts) <- mgenes
 mcounts <- t(mcounts) # samples x genes
-mcounts <- 2^mcounts # retrieve raw cpm values; ROUND TO NEAREST INT?
+mcounts <- 2^mcounts # retrieve raw cpm values
 mID <- sub("\\_.*", "", rownames(mcounts)) # list of sample ptypes
 
 ### Repeat for human data (in fpkm! raw counts = fpkm*transcipt_length...)
@@ -47,8 +46,10 @@ hdata <- read.csv(file = '../Data/Human_SLE_Ctrl.csv')
 hgenes <- hdata[,c("ENTREZID","SYMBOL")]
 hgenes <- hgenes[complete.cases(hgenes),]
 hcounts <- hdata[hdata$ENTREZID %in% hgenes$ENTREZID,4:ncol(hdata)]
+hcounts <- hcounts[-which(grepl("2-Mar",hgenes[,2])),]
+hgenes <- hgenes[-which(grepl("2-Mar",hgenes[,2])),]
 rownames(hcounts) <- hgenes[,1]
-hcounts <- t(hcounts) # samples x genes
+hcounts <- t(hcounts)
 hID <- sub("\\..*", "", rownames(hcounts))
 ```
 
@@ -132,16 +133,11 @@ full_results_mouse <- full_results_mouse %>%
   mutate(Significant = adj.P.Val < p_cutoff, abs(logFC) > fc_cutoff ) %>% 
   mutate(Rank = 1:n(), Label = ifelse(Rank < topN, ID,"")) %>%
   mutate(logpval = -log10(adj.P.Val))
-
-### Compare two methods of DE analysis
-# 4391 genes vs 2254 (Ko); 2022 in common
-davis_hdegs <- full_results_human$ID[which(full_results_human$Significant==TRUE)] 
-
-# 431 genes vs 834 (Ko); 368 in common
-davis_mdegs <- full_results_mouse$ID[which(full_results_mouse$Significant==TRUE)] 
 ```
 
+
 # GO Enrichment of DEGs using topGO
+
 ``` {GO enrichment}
 # GO enrichment of DEGs
 # documentation: https://www.bioconductor.org/packages/devel/bioc/vignettes/topGO/inst/doc/topGO.pdf
@@ -164,37 +160,50 @@ resultKS <- runTest(mGOdata, algorithm = "classic", statistic = "ks")
 resultKS.elim <- runTest(mGOdata, algorithm = "elim", statistic = "ks")
 mallRes <- GenTable(mGOdata, classicFisher = resultFisher,
                     classicKS = resultKS, elimKS = resultKS.elim,
-                    orderBy = "elimKS", ranksOf = "classicFisher", topNodes = 10)
+                    orderBy = "elimKS", ranksOf = "classicFisher", topNodes = 20)
 
 # Visualize GO term distribution over GO graph; manually saved from Rstudio
 mGOgraph <- showSigOfNodes(mGOdata, score(resultKS.elim), firstSigNodes = 5, useInfo = 'all')
 
-# Save results table to pdf
-pdf("../Figures/mouseGOenrich.pdf", height = nrow(mallRes), width = 1.5*ncol(mallRes))
-grid.table(mallRes)
-dev.off()
-
-# Repeat for human data; USED FPKM VALUES AS IS
-hgeneList <- data.frame(hdegs)$PValue
-names(hgeneList) <- rownames(hdegs)
+### Human data
+hgeneList <- full_results_human$'P.Value'
+names(hgeneList) <- full_results_human$ID
 hGOdata <- new("topGOdata",
                ontology = "BP",
                allGenes = hgeneList,
-               geneSelectionFun = function(x)x, # NEEDS TO BE REVISITED
+               geneSelectionFun = function(x)x, # should be used to select for significant genes?
                annot = annFUN.org, 
                mapping = "org.Hs.eg.db",
                ID = "ENTREZ")
 
-# Kolmogorov-Smirnov testing
+# Fisher and Kolmogorov-Smirnov enrichment tests
 resultFisher <- runTest(hGOdata, algorithm = "classic", statistic = "fisher")
 resultKS <- runTest(hGOdata, algorithm = "classic", statistic = "ks")
 resultKS.elim <- runTest(hGOdata, algorithm = "elim", statistic = "ks")
 hallRes <- GenTable(hGOdata, classicFisher = resultFisher,
                     classicKS = resultKS, elimKS = resultKS.elim,
-                    orderBy = "elimKS", ranksOf = "classicFisher", topNodes = 10)
+                    orderBy = "elimKS", ranksOf = "classicFisher", topNodes = 20)
 
-# Save results table to pdf
-pdf("../Figures/humanGOenrich.pdf", height = nrow(hallRes), width = 1.5*ncol(hallRes))
-grid.table(hallRes)
-dev.off()
+# Visualize GO term distribution over GO graph; manually saved from Rstudio
+hGOgraph <- showSigOfNodes(hGOdata, score(resultKS.elim), firstSigNodes = 5, useInfo = 'all')
+
+```
+
+# Visualization
+
+```{r visualize functional enrichment}
+### Mouse dotplot
+df_dot <- mallRes[,c("Term","elimKS")]
+df_dot <- df_dot[1:20,]
+m_dotplt <- dotchart(as.numeric(df_dot$elimKS), labels=df_dot$Term, cex=.7,
+                     main="Mouse enrichment for GO terms", xlab="KS elim pval")
+
+### Human dotplot
+df_dot <- hallRes[,c("Term","elimKS")]
+df_dot <- df_dot[1:20,]
+h_dotplt <- dotchart(as.numeric(df_dot$elimKS), labels=df_dot$Term, cex=.7,
+                     main="Human enrichment for GO terms", xlab="KS elim pval")
+
+# Save dot plots to pdf
+# had to manually save
 ```
