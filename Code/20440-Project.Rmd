@@ -343,7 +343,8 @@ results_human <- dnapath(human_Entrez_genes,
 results_mouse <- dnapath(mouse_Entrez_genes, 
                    pathway_list = react_paths_mouse, 
                    groups = ID,
-                   network_inference = run_corr)
+                   network_inference = run_corr,
+                   method = "pearson")
 
 results_human <- filter_pathways(results_human, alpha_pathway = 0.01)
 results_mouse <- filter_pathways(results_mouse,alpha_pathway = 0.333) #limited by replicate number
@@ -365,86 +366,133 @@ g <- SeqNet::plot_network(nw[[1]])
 SeqNet::plot_network(nw[[1]], compare_graph = g)
 # Plot of the differential network for pathway 1.
 # Use compare_graph to maintain same layout
-plot(results_human[[1]], compare_graph = g)
+SeqNet::plot(results_human[[1]], compare_graph = g)
 
 #Get dnapath_list format into dataframe for both mouse and human
 pathway <- list()
-edges <- list()
+genes <- list()
 dc_score <- list()
 pval <- list()
-nw1 <- list()
-nw2 <- list()
+mean_expr1 <- list()
+mean_expr2 <- list()
 
 for (path in 1:length(results_human))
 {
-  tmp <- summary(results_human[[path]], by_gene = FALSE)
+  tmp <- summary(results_human[[path]], by_gene = TRUE)
   pathway <- append(pathway, tmp$pathway)
-  edges <- append(edges, tmp$edges)
+  genes <- append(genes, tmp$genes)
   dc_score <- append(dc_score, tmp$dc_score)
   pval <- append(pval, tmp$p_value)
-  nw1 <- append(nw1, tmp$nw1)
-  nw2 <- append(nw2, tmp$nw2)
+  mean_expr1 <- append(mean_expr1, tmp$mean_expr1)
+  mean_expr2 <- append(mean_expr2, tmp$mean_expr2)
 }
 
 df_human <- data.frame(pathway = unlist(pathway),
-                       edges = unlist(edges),
+                       genes = unlist(genes),
                        dc_score = unlist(dc_score),
                        pval = unlist(pval),
-                       nw1 = unlist(nw1),
-                       nw2 = unlist(nw2))
+                       mean_expr1 = unlist(mean_expr1),
+                       mean_expr2 = unlist(mean_expr2))
 
 pathway <- list()
-edges <- list()
+genes <- list()
 dc_score <- list()
 pval <- list()
-nw1 <- list()
-nw2 <- list()
+mean_expr1 <- list()
+mean_expr2 <- list()
 
 for (path in 1:length(results_mouse))
 {
-  tmp <- summary(results_mouse[[path]], by_gene = FALSE)
+  tmp <- summary(results_mouse[[path]], by_gene = TRUE)
   pathway <- append(pathway, tmp$pathway)
-  edges <- append(toupper(edges), tmp$edges)
+  genes <- append(toupper(genes), tmp$genes)
   dc_score <- append(dc_score, tmp$dc_score)
   pval <- append(pval, tmp$p_value)
-  nw1 <- append(nw1, tmp$nw1)
-  nw2 <- append(nw2, tmp$nw2)
+  mean_expr1 <- append(mean_expr1, tmp$mean_expr1)
+  mean_expr2 <- append(mean_expr2, tmp$mean_expr2)
 }
 
 df_mouse <- data.frame(pathway = unlist(pathway),
-                       edges = unlist(edges),
+                       genes = unlist(genes),
                        dc_score = unlist(dc_score),
                        pval = unlist(pval),
-                       nw1 = unlist(nw1),
-                       nw2 = unlist(nw2))
+                       mean_expr1 = unlist(mean_expr1),
+                       mean_expr2 = unlist(mean_expr2))
 
-#Which pathways are differentially connected in both the mouse and human models?
+#Which genes are differentially connected in both the mouse and human models?
 
-#Make sure they are in the same direction! ie control > or < SLE in BOTH
+df_human_overlap <- unique(df_human$genes[which(df_human$genes %in% df_mouse$genes)])
+df_mouse_overlap <- unique(df_mouse$genes[which(df_mouse$genes %in% df_human$genes)])
+df_overlap <- data.frame(human = sort(df_human_overlap), mouse = sort(df_mouse_overlap))
 
-higher_dc_mouse <- subset(df_mouse, nw1 > nw2)
-lower_dc_mouse <- subset(df_mouse, nw1 < nw2)
-higher_dc_human <- subset(df_human, nw1 > nw2)
-lower_dc_human <- subset(df_human, nw1 < nw2)
-
-#Pull only differentially expressed genes out for each
-#higher_dc_mouse <- subset(higher_dc_mouse, pval < 0.35)
-#lower_dc_mouse <- subset(lower_dc_mouse, pval < 0.35)
-#higher_dc_human <- subset(higher_dc_human, pval < 0.05)
-#lower_dc_human <- subset(lower_dc_human, pval < 0.05)
-
-high_overlap <- higher_dc_human[which(higher_dc_human$edges %in% higher_dc_mouse$edges),]
-low_overlap <- lower_dc_human[which(lower_dc_human$edges %in% lower_dc_mouse$edges),]
-low_overlap$dc_score <- -(low_overlap$dc_score)
-human_overlap <- rbind(high_overlap, low_overlap)
-
-high_overlap <- higher_dc_mouse[which(higher_dc_mouse$edges %in% higher_dc_human$edges),]
-low_overlap <- lower_dc_mouse[which(lower_dc_mouse$edges %in% lower_dc_human$edges),]
-low_overlap$dc_score <- -(low_overlap$dc_score)
-mouse_overlap <- rbind(high_overlap, low_overlap)
+#What human pathways are those overlapping genes involved in?
+human_overlap <- df_human[which(df_human$genes %in% df_overlap$human),]
+human_overlap <- human_overlap[which(human_overlap$pval < 0.05),]
+human_overlap <- as.data.frame(count(human_overlap,human_overlap$pathway))
+colnames(human_overlap) <- c("Pathway","Count")
+human_overlap$Pathway <- sapply(strsplit(human_overlap$Pathway,"See"), `[`, 1)
+human_overlap$Pathway <- as.factor(human_overlap$Pathway)
 
 
-#Use Entrez IDs (column 2) from overlap pathways to identify GO and KEGG enriched pathways
+#Plot top 20 pathways (by # of DE genes shared by mouse/human)
+#Most of #s15-25 are signalling, so selected these for showing
+ordered_overlap <- human_overlap[order(-human_overlap$Count),]
+ordered_overlap_a <- ordered_overlap[which(ordered_overlap$Count >5),]
+ordered_overlap_b <- ordered_overlap[which(grepl("signal|Caspase|DUB"
+                                                 ,ordered_overlap$Pathway)),] #adding to make an even 30
+ordered_overlap_b <- ordered_overlap_b[which(ordered_overlap_b$Count == 5),]
+oo <- rbind(ordered_overlap_a,ordered_overlap_b)
+
+#Plot of differentially connected networks ordered by # of DC genes in network
+p2 <-  ggplot(oo, aes(x=reorder(Pathway, Count), y=Count)) +
+    geom_bar(stat="identity", fill="#f68060", alpha=.6) +
+    coord_flip() +
+    labs(y="Number of Significantly Differentially Connected Genes in Pathway",
+         x = "Reactome Pathway",
+         title = "Top 30 Human Pathways Most Differentially Connected") +
+    theme_classic() +
+    theme(axis.text = element_text(size = 40, face = "bold"),
+        axis.title = element_text(size = 50),
+        axis.ticks = element_blank(), 
+        plot.title = element_text(hjust=0.5, size = 50))
+p2
+
+#Print plot to pdf
+pdf(paste("../Figures/Reactome_DC",".pdf", sep = ""),
+    width = 45, height = 40) 
+print(p2)
+dev.off() 
+
+#Now only look at Reactome pathways from differentially connected AND expressed
+df_human_sort <- data.frame(df_human[order(-df_human$dc_score),])
+df_human_sort <- df_human_sort[which(
+  abs(log2(df_human_sort$mean_expr1/df_human_sort$mean_expr2)) > 1),]
+df_human_sort <- df_human_sort[-which(
+  df_human_sort$pval > 0.05),]
+path_list <- count(df_human_sort,df_human_sort$pathway)
+df_human_sort_rank <- path_list[order(-path_list$n),]
+colnames(df_human_sort_rank) <-c("Pathway","Count")
+df_human_sort_rank$Pathway <- sapply(strsplit(df_human_sort_rank$Pathway,"See"), `[`, 1)
+df_human_sort_rank$Pathway <- as.factor(df_human_sort_rank$Pathway)
+  
+p3 <-  ggplot(subset(df_human_sort_rank, Count >1),
+              aes(x=reorder(Pathway, Count), y=Count)) +
+    geom_bar(stat="identity", fill="#f68060", alpha=.6) +
+    coord_flip() +
+    labs(y="Number of Significantly Differentially Connected   \n and Enriched Genes in Pathway",
+         x = "Reactome Pathway",
+         title = "Top Human Pathways Most Enriched \n in Differentially Connected and Expressed Genes") +
+    theme_classic() +
+    theme(axis.text = element_text(size = 40, face = "bold"),
+        axis.title = element_text(size = 50),
+        axis.ticks = element_blank(), 
+        plot.title = element_text(hjust=0.5, size = 50))
+
+#Print plot to pdf
+pdf(paste("../Figures/Reactome_DC_DE",".pdf", sep = ""),
+    width = 45, height = 40) 
+print(p3)
+dev.off()
 ```
 
 #DC Volcano plots
@@ -459,11 +507,11 @@ topN <- 20 #top N genes for annotation
 #set parameters, plot volcano plot of DE and significance
 human_overlap <- human_overlap %>% 
   mutate(Significant = pval < p_cutoff, abs(dc_score) > dc_cutoff ) %>% 
-  mutate(Rank = 1:n(), Label = ifelse(Rank < topN, edges,"")) %>%
+  mutate(Rank = 1:n(), Label = ifelse(Rank < topN, genes,"")) %>%
   mutate(logpval = -log10(pval))
 mouse_overlap <- mouse_overlap %>% 
   mutate(Significant = pval < p_cutoff, abs(dc_score) > dc_cutoff ) %>% 
-  mutate(Rank = 1:n(), Label = ifelse(Rank < topN, edges,"")) %>%
+  mutate(Rank = 1:n(), Label = ifelse(Rank < topN, genes,"")) %>%
   mutate(logpval = -log10(pval))
 
 #Plot human or mouse volcano plots by switching title, full_results_(desired species)
