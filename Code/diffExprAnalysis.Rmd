@@ -8,7 +8,6 @@ output: html_document
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
 ```
-
 # Load packages
 
 ```{r load, include=FALSE}
@@ -52,157 +51,204 @@ rownames(hcounts) <- hgenes[,1]
 hcounts <- t(hcounts)
 hID <- sub("\\..*", "", rownames(hcounts))
 ```
+# Functions
 
-# Differential Expression Analysis ("DE") using EdgeR
+```{r Useful functions}
+empiricalBayes <- function(cnts, ID, contrast, p_cutoff, fc_cutoff, topN) {
+  ### Input:
+  #     cnts: count data (samples x genes)
+  #     ID: list of sample ptypes
+  #     contrast: string of contrast formula (e.g. "DKO-WT" or "SLE-HC")
+  #     p_cutoff: p-value threshold for significance
+  #     fc_cutoff: abs(log fold change) threshold for significance
+  #     topN: number of top genes for annotation
+  
+  ### Output:
+  #     res: DE analysis results 
+  
+  # Create identification matrix mapping samples with ptype
+  mat <- model.matrix(~0+ID)
+  colnames(mat) <- substr(colnames(mat),3,nchar(colnames(mat)))
+  
+  # Fit a linear model of gene counts by the design matrix, so each group is compared. 
+  # Transpose cpm counts to align with design matrix.
+  model <- lmFit(t(cnts), mat)
+  
+  # Create contrast matrix
+  cont_mat <- makeContrasts(contrasts=contrast, levels=mat)
+  
+  # Compute estimated coefficients from linear model fit, contrasts
+  model2 <- contrasts.fit(model, cont_mat)
+  
+  # Takes microarray linear fit model, returns t-statistics, F-statistics, and 
+  # log-odds of differential expression using empirical Bayes' moderation
+  model2 <- eBayes(model2)
+  
+  # Check how many genes are significantly over-expressed or under-expressed
+  # between conditions, and which are equally expressed
+  table(decideTests(model2)) #returns # of over (+1) or under (-1) expressed genes
+  
+  # Get table of top-ranked genes, make gene names explicit variable
+  res <- topTable(model2, number=Inf, adjust.method="BH")
+  res <- tibble::rownames_to_column(res,"ID")
+  
+  #Reformat full results to have additional variables of interest, filter for 
+  #set parameters, plot volcano plot of DE and significance
+  res <- res %>% 
+    mutate(Significant = adj.P.Val < p_cutoff, abs(logFC) > fc_cutoff ) %>% 
+    mutate(Rank = 1:n(), Label = ifelse(Rank < topN, ID,"")) %>%
+    mutate(logpval = -log10(adj.P.Val))
 
-```{r Differential Expression, GO enrichment}
-# https://www.bioconductor.org/packages/release/bioc/vignettes/edgeR/inst/doc/edgeRUsersGuide.pdf
-# BiocManager::install("edgeR")
-### Criteria for DEG
-p_cutoff <- 0.05
-fc_cutoff <- 1
-topNPerc <- 0.20 # top N% of genes for annotation
+  return(res)
+}
 
-### Mouse DE analysis
-my <- DGEList(counts=t(mcounts), group=mID)
-keep <- filterByExpr(my) # filter out lowly expressed genes (?)
-my <- my[keep,,keep.lib.sizes=FALSE]
-my <- calcNormFactors(my)
-mdesign <- model.matrix(~mID)
-my <- estimateDisp(my,mdesign)
-
-# Find DEGs
-topN <- round(topNPerc*ncol(mcounts))
-met <- exactTest(my)
-mdegs <- topTags(met, n=topN, sort.by = "logFC", p.value=p_cutoff)
-
-### Human DE analysis
-hy <- DGEList(counts=t(hcounts), group=hID)
-keep <- filterByExpr(hy) # filter out lowly expressed genes (?)
-hy <- hy[keep,,keep.lib.sizes=FALSE]
-hy <- calcNormFactors(hy)
-hdesign <- model.matrix(~hID)
-hy <- estimateDisp(hy,hdesign)
-
-topN <- round(topNPerc*ncol(hcounts))
-het <- exactTest(hy)
-hdegs <- topTags(het, n=topN, sort.by = "logFC", p.value=p_cutoff)
+GOenrich <- function(geneList, genes, topGO_args) {
+  ### Input
+  #     geneList: DE analysis result values for enrichment analysis (e.g. pval)
+  #     genes: list of genes of type specified in ID
+  #     topGO_args: arguments for new topGOdata object
+  #       - ontology: what kind of ontology to use (e.g. BP)
+  #       - geneSelectFun: function to select significant genes??? INCORPORATE PVAL<0.05 HERE?
+  #       - mapping: string of what database to use for mapping
+  #       - ID: type of gene ID (e.g. symbol, entrez)
+  
+  ### Output
+  #     ???: GO enriched terms and stats
+  
+  names(geneList) <- genes
+  
+  # Create topGOdata object
+  GOdata <- new("topGOdata",
+                ontology = go_args[[1]],
+                allGenes = geneList,
+                geneSelectionFun = go_args[[2]],
+                annot = annFUN.org, 
+                mapping = go_args[[3]],
+                ID = go_args[[4]])
+  
+  # Run several kinds of enrichment tests
+  resFisher <- runTest(GOdata, algorithm = "classic", statistic = "fisher")
+  resKS <- runTest(GOdata, algorithm = "classic", statistic = "ks")
+  resKS.elim <- runTest(GOdata, algorithm = "elim", statistic = "ks")
+  
+  # Generate table of results of enrichment results
+  allRes <- GenTable(GOdata, classicFisher = resFisher,
+                     classicKS = resKS, elimKS = resKS.elim,
+                     orderBy = "elimKS", ranksOf = "classicFisher", 
+                     topNodes = 20)
+  
+  res <- list(GOdata, resFisher, resKS, resKS.elim, allRes)
+  return(res)
+}
 ```
+
 # Differential Expression Analysis ("DE")
 
 ```{r Differential Expression}
-#Create identification matrix designating each sample as DKO or WT
-matrix_mouse <- model.matrix(~0+mID)
-matrix_human <- model.matrix(~0+hID)
-colnames(matrix_mouse) <- c("DKO","WT")
-colnames(matrix_human) <- c("Control","SLE")
-#Fit a linear model of gene counts by the design matrix, 
-#so each group is compared. Transpose cpm counts to align with design matrix.
-fit_human <- lmFit(t(hcounts), matrix_human)
-fit_mouse <- lmFit(t(mcounts), matrix_mouse)
-#makeContrasts takes expression specifying contrasts, returns contrast matrix
-contrasts_mouse <- makeContrasts(DKO - WT, levels=matrix_mouse)
-contrasts_human <- makeContrasts(SLE - Control, levels=matrix_human)
-#Compute estimated coefficients from linear model fit, contrasts
-fit2_mouse <- contrasts.fit(fit_mouse, contrasts_mouse)
-fit2_human <- contrasts.fit(fit_human, contrasts_human)
-#Takes microarray linear fit model, returns t-statistics, F-statistics, and 
-#log-odds of differential expression using empirical Bayes' moderation
-fit2_mouse <- eBayes(fit2_mouse)
-fit2_human <- eBayes(fit2_human)
-#Check how many genes are significantly over-expressed or under-expressed
-#between conditions, and which are equally expressed (~10% of genes are 
-#significantly diff. expressed)
-table(decideTests(fit2_mouse)) #returns # of over (+1) or under (-1) expressed genes
-table(decideTests(fit2_human))
-#Get table of top-ranked genes, make gene names explicit variable
-full_results_mouse <- topTable(fit2_mouse, number=Inf, adjust.method="BH")
-full_results_mouse <- tibble::rownames_to_column(full_results_mouse,"ID")
-full_results_human <- topTable(fit2_human, number=Inf, adjust.method="BH")
-full_results_human <- tibble::rownames_to_column(full_results_human,"ID")
-p_cutoff <- 0.05
-fc_cutoff <- 1
-topN <- 100 #top N genes for annotation
-#Reformat full results to have additional variables of interest, filter for 
-#set parameters, plot volcano plot of DE and significance
-full_results_human <- full_results_human %>% 
-  mutate(Significant = adj.P.Val < p_cutoff, abs(logFC) > fc_cutoff ) %>% 
-  mutate(Rank = 1:n(), Label = ifelse(Rank < topN, ID,"")) %>%
-  mutate(logpval = -log10(adj.P.Val))
-full_results_mouse <- full_results_mouse %>% 
-  mutate(Significant = adj.P.Val < p_cutoff, abs(logFC) > fc_cutoff ) %>% 
-  mutate(Rank = 1:n(), Label = ifelse(Rank < topN, ID,"")) %>%
-  mutate(logpval = -log10(adj.P.Val))
+### Mouse
+mres <- empiricalBayes(mcounts, mID, contrast="DKO-WT", 
+                       p_cutoff=0.05, fc_cutoff=1, topN=0.2*dim(mcounts)[2])
+
+### Human
+hres <- empiricalBayes(hcounts, hID, contrast="SLE-HC", 
+                       p_cutoff=0.05, fc_cutoff=1, topN=0.2*dim(hcounts)[2])
 ```
+# DEG overlap between human and mouse
 
+```{r DE overlaps}
+# Map human ENTREZ ids -> Symbol
+h_entrez <- mapIds(org.Hs.eg.db, keys=hres$ID, column="SYMBOL", keytype="ENTREZID")
+hres$Symbol <- h_entrez
 
+# Identify up- and down-regulated genes in both species
+m_updegs <- subset(mres, logFC > 0 & Significant == TRUE)
+m_downdegs <- subset(mres, logFC < 0 & Significant == TRUE)
+h_updegs <- subset(hres, logFC > 0 & Significant == TRUE)
+h_downdegs <- subset(hres, logFC < 0 & Significant == TRUE)
+
+# Identify overlapping genes in both species
+up_overlap <- intersect(toupper(m_updegs$ID), h_updegs$Symbol)
+down_overlap <- intersect(toupper(m_downdegs$ID), h_downdegs$Symbol)
+overlap <- c(up_overlap, down_overlap)
+
+# Convert GO terms in publicly available db to a list?
+human_GO_terms <- org.Hs.egGO
+mapped_genes <- mappedkeys(human_GO_terms) # entrez:GO mapping
+human_GO_list <- as.list(human_GO_terms[mapped_genes])
+# GET OVERLAPPING GENES' ASSOCIATED GO TERMS?
+
+```
 # GO Enrichment of DEGs using topGO
 
-``` {GO enrichment}
+``` {GO enrichment DEGs}
 # GO enrichment of DEGs
 # documentation: https://www.bioconductor.org/packages/devel/bioc/vignettes/topGO/inst/doc/topGO.pdf
 # walkthru: https://ucdavis-bioinformatics-training.github.io/2018-June-RNA-Seq-Workshop/friday/enrichment.html
-# mgeneList <- data.frame(mdegs)$PValue
-# names(mgeneList) <- rownames(mdegs)
-mgeneList <- full_results_mouse$'P.Value'
-names(mgeneList) <- full_results_mouse$ID
-mGOdata <- new("topGOdata",
-               ontology = "BP",
-               allGenes = mgeneList,
-               geneSelectionFun = function(x)x, # should be used to select for significant genes?
-               annot = annFUN.org, 
-               mapping = "org.Mm.eg.db",
-               ID = "SYMBOL")
+### Mouse
+# Set up input arguments
+geneSelectFun <- function(x)x
+go_args <- c("BP", geneSelectFun, "org.Mm.eg.db", "SYMBOL")
 
-# Fisher and Kolmogorov-Smirnov enrichment tests
-resultFisher <- runTest(mGOdata, algorithm = "classic", statistic = "fisher")
-resultKS <- runTest(mGOdata, algorithm = "classic", statistic = "ks")
-resultKS.elim <- runTest(mGOdata, algorithm = "elim", statistic = "ks")
-mallRes <- GenTable(mGOdata, classicFisher = resultFisher,
-                    classicKS = resultKS, elimKS = resultKS.elim,
-                    orderBy = "elimKS", ranksOf = "classicFisher", topNodes = 20)
+# Output GO enrichment results
+mGOres <- GOenrich(mres$adj.P.Val, mres$ID, go_args) 
+mGOdata <- mGOres[[1]]
+mresFisher <- mGOres[[2]]
+mresKS <- mGOres[[3]]
+mresKS.elim <- mGOres[[4]]
+mallRes <- mGOres[[5]]
+showSigOfNodes(mGOdata, score(mresKS.elim), firstSigNodes = 5, useInfo = 'all')
 
-# Visualize GO term distribution over GO graph; manually saved from Rstudio
-mGOgraph <- showSigOfNodes(mGOdata, score(resultKS.elim), firstSigNodes = 5, useInfo = 'all')
+### Human
+# Set up input arguments
+go_args <- c("BP", geneSelectFun, "org.Hs.eg.db", "ENTREZ")
 
-### Human data
-hgeneList <- full_results_human$'P.Value'
-names(hgeneList) <- full_results_human$ID
-hGOdata <- new("topGOdata",
-               ontology = "BP",
-               allGenes = hgeneList,
-               geneSelectionFun = function(x)x, # should be used to select for significant genes?
-               annot = annFUN.org, 
-               mapping = "org.Hs.eg.db",
-               ID = "ENTREZ")
+# Output GO enrichment results as c(GOdata, resFisher, resKS, resKS.elim, allRes)
+hGOres <- GOenrich(hres$adj.P.Val, hres$ID, go_args) 
+hGOdata <- hGOres[[1]]
+hresFisher <- hGOres[[2]]
+hresKS <- hGOres[[3]]
+hresKS.elim <- hGOres[[4]]
+hallRes <- hGOres[[5]]
+showSigOfNodes(hGOdata, score(hresKS.elim), firstSigNodes = 5, useInfo = 'all')
+```
+# GO Enrichment of overlapping genes using topGO
 
-# Fisher and Kolmogorov-Smirnov enrichment tests
-resultFisher <- runTest(hGOdata, algorithm = "classic", statistic = "fisher")
-resultKS <- runTest(hGOdata, algorithm = "classic", statistic = "ks")
-resultKS.elim <- runTest(hGOdata, algorithm = "elim", statistic = "ks")
-hallRes <- GenTable(hGOdata, classicFisher = resultFisher,
-                    classicKS = resultKS, elimKS = resultKS.elim,
-                    orderBy = "elimKS", ranksOf = "classicFisher", topNodes = 20)
+``` {GO enrichment overlap}
+# Set up input arguments and subset human data for overlap
+geneSelectFun <- function(x)x
+go_args <- c("BP", geneSelectFun, "org.Hs.eg.db", "SYMBOL")
+hres_overlap <- hres[which(hres$Symbol %in% overlap),]
 
-# Visualize GO term distribution over GO graph; manually saved from Rstudio
-hGOgraph <- showSigOfNodes(hGOdata, score(resultKS.elim), firstSigNodes = 5, useInfo = 'all')
+# Output GO enrichment results
+GOres <- GOenrich(hres_overlap$adj.P.Val, hres_overlap$Symbol, go_args) 
+GOdata <- GOres[[1]]
+resFisher <- GOres[[2]]
+resKS <- GOres[[3]]
+resKS.elim <- GOres[[4]]
+allRes <- GOres[[5]]
+showSigOfNodes(GOdata, score(resKS.elim), firstSigNodes = 5, useInfo = 'all')
 
 ```
-
 # Visualization
 
 ```{r visualize functional enrichment}
 ### Mouse dotplot
 df_dot <- mallRes[,c("Term","elimKS")]
 df_dot <- df_dot[1:20,]
-m_dotplt <- dotchart(as.numeric(df_dot$elimKS), labels=df_dot$Term, cex=.7,
-                     main="Mouse enrichment for GO terms", xlab="KS elim pval")
+dotchart(as.numeric(df_dot$elimKS), labels=df_dot$Term, cex=.7,
+         main="Mouse enrichment for GO terms", xlab="KS elim pval")
 
 ### Human dotplot
 df_dot <- hallRes[,c("Term","elimKS")]
 df_dot <- df_dot[1:20,]
-h_dotplt <- dotchart(as.numeric(df_dot$elimKS), labels=df_dot$Term, cex=.7,
-                     main="Human enrichment for GO terms", xlab="KS elim pval")
+dotchart(as.numeric(df_dot$elimKS), labels=df_dot$Term, cex=.7,
+         main="Human enrichment for GO terms", xlab="KS elim pval")
+
+### Overlap dotplot
+df_dot <- allRes[,c("Term","elimKS")]
+df_dot <- df_dot[1:20,]
+dotchart(as.numeric(df_dot$elimKS), labels=df_dot$Term, cex=.7,
+         main="Mouse-Human overlap enrichment for GO terms", xlab="KS elim pval")
 
 # Save dot plots to pdf
 # had to manually save
