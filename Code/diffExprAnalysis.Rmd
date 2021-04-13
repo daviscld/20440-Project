@@ -22,35 +22,6 @@ library(edgeR)
 library(topGO)
 set.seed(1234)  # random seed for reproducibility
 ```
-
-# Download and clean data
-
-```{r GEO data from downloaded csv}
-# same as PCA_heatmap.Rmd code w/o normalized counts (e.g. mX, hX)
-### Mouse data
-# Import the data and pull out gene names, counts (log2 cpm)
-mdata <- read.csv(file = '../Data/ABC_WT_DKO.csv')
-mgenes <- mdata[,"genes"]
-mgenes <- mgenes[complete.cases(mgenes)]
-cpm_cols <- c("WT_1_log2.cpm.","WT_2_log2.cpm.", 
-              "DKO_1_log2.cpm.","DKO_2_log2.cpm.")
-mcounts <- mdata[mdata$genes %in% mgenes, cpm_cols]
-rownames(mcounts) <- mgenes
-mcounts <- t(mcounts) # samples x genes
-mcounts <- 2^mcounts # retrieve raw cpm values
-mID <- sub("\\_.*", "", rownames(mcounts)) # list of sample ptypes
-
-### Repeat for human data (in fpkm! raw counts = fpkm*transcipt_length...)
-hdata <- read.csv(file = '../Data/Human_SLE_Ctrl.csv')
-hgenes <- hdata[,c("ENTREZID","SYMBOL")]
-hgenes <- hgenes[complete.cases(hgenes),]
-hcounts <- hdata[hdata$ENTREZID %in% hgenes$ENTREZID,4:ncol(hdata)]
-hcounts <- hcounts[-which(grepl("2-Mar",hgenes[,2])),]
-hgenes <- hgenes[-which(grepl("2-Mar",hgenes[,2])),]
-rownames(hcounts) <- hgenes[,1]
-hcounts <- t(hcounts)
-hID <- sub("\\..*", "", rownames(hcounts))
-```
 # Functions
 
 ```{r Useful functions}
@@ -140,6 +111,35 @@ GOenrich <- function(geneList, genes, topGO_args) {
   res <- list(GOdata, resFisher, resKS, resKS.elim, allRes)
   return(res)
 }
+```
+
+# Download and clean data
+
+```{r GEO data from downloaded csv}
+# same as PCA_heatmap.Rmd code w/o normalized counts (e.g. mX, hX)
+### Mouse data
+# Import the data and pull out gene names, counts (log2 cpm)
+mdata <- read.csv(file = '../Data/ABC_WT_DKO.csv')
+mgenes <- mdata[,"genes"]
+mgenes <- mgenes[complete.cases(mgenes)]
+cpm_cols <- c("WT_1_log2.cpm.","WT_2_log2.cpm.", 
+              "DKO_1_log2.cpm.","DKO_2_log2.cpm.")
+mcounts <- mdata[mdata$genes %in% mgenes, cpm_cols]
+rownames(mcounts) <- mgenes
+mcounts <- t(mcounts) # samples x genes
+mcounts <- 2^mcounts # retrieve raw cpm values
+mID <- sub("\\_.*", "", rownames(mcounts)) # list of sample ptypes
+
+### Repeat for human data (in fpkm! raw counts = fpkm*transcipt_length...)
+hdata <- read.csv(file = '../Data/Human_SLE_Ctrl.csv')
+hgenes <- hdata[,c("ENTREZID","SYMBOL")]
+hgenes <- hgenes[complete.cases(hgenes),]
+hcounts <- hdata[hdata$ENTREZID %in% hgenes$ENTREZID,4:ncol(hdata)]
+hcounts <- hcounts[-which(grepl("2-Mar",hgenes[,2])),]
+hgenes <- hgenes[-which(grepl("2-Mar",hgenes[,2])),]
+rownames(hcounts) <- hgenes[,1]
+hcounts <- t(hcounts)
+hID <- sub("\\..*", "", rownames(hcounts))
 ```
 
 # Differential Expression Analysis ("DE")
