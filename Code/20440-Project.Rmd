@@ -221,18 +221,35 @@ high_de_overlap <- higher_de_human[which(toupper(higher_de_mouse$ID) %in% higher
 low_de_overlap <- lower_de_human[which(toupper(lower_de_mouse$ID) %in% lower_de_human$ID),]
 de_overlap <- rbind(high_de_overlap, low_de_overlap)
 
-#Use Entrez IDs (column 2) from overlap pathways to identify GO and KEGG enriched pathways
+#Use Entrez IDs (column 2) from overlap pathways to identify Reactome enriched pathways
 human_gene_IDs <- mapIds(org.Hs.eg.db, de_overlap$ID, 'ENTREZID', 'SYMBOL')
 de_overlap$EntrezID <- human_gene_IDs
+de_overlap <- de_overlap[!is.na(de_overlap$EntrezID), ]
 
-# Convert GO terms in publicly available db to a list
-human_GO_terms <- org.Hs.egGO
-# Get the entrez gene identifiers that are mapped to a GO ID
-mapped_genes <- mappedkeys(human_GO_terms)
-# Convert to a list
-human_GO_list <- as.list(human_GO_terms[mapped_genes])
+de_reactome <- enrichPathway(gene=de_overlap$EntrezID, 
+                             organism = "human",
+                             pvalueCutoff = 0.05,
+                             pAdjustMethod = "BH",
+                             readable=FALSE)
 
+#Dotplot visualization of Reactome network terms
+p <- dotplot(de_reactome, showCategory=30)
+#Print to pdf
+pdf(paste("../Figures/Reactome_DotPlot",".pdf", sep = ""), 
+    width = 20, height = 8) 
+print(p)
+dev.off()
 
+## Alternative Reactome network visualization
+edox <- setReadable(de_reactome, 'org.Hs.eg.db', 'ENTREZID')
+
+p3 <- cnetplot(edox, showCategory = 15, circular = TRUE, colorEdge = TRUE)
+
+#Print to pdf
+pdf(paste("../Figures/Reactome_Network",".pdf", sep = ""), 
+    width = 20, height = 8) 
+print(p3)
+dev.off()
 ```
 
 
@@ -306,7 +323,9 @@ dev.off()
 library(org.Hs.eg.db)
 
 #BiocManager::install("org.Mm.eg.db")
-
+#BiocManager::install("DOSE")
+library(DOSE)
+library(ggnewscale)
 library(org.Mm.eg.db)
 library(githubinstall)
 #githubinstall("dnapath")
@@ -317,6 +336,8 @@ library(reactome.db)
 library(SeqNet)
 library(topGO)
 library(tidyverse)
+#BiocManager::install("ReactomePA")
+library(ReactomePA)
 ```
 
 ``` {r DC analysis}
