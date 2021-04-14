@@ -89,12 +89,12 @@ hID <- df_diagnosis$diagnosis
 pca <- prcomp(hX)
 
 ## Add sample info to PCs and plot
-labeled_PCs <- as.data.frame(cbind(as.factor(ID), pca$x))
-plt <- ggplot(labeled_PCs, aes(x = PC1, y=PC2, color=ID)) + 
+labeled_PCs <- as.data.frame(cbind(hID, pca$x))
+plt <- ggplot(labeled_PCs, aes(x = PC1, y=PC2, color=hID)) + 
   geom_point(shape = 19, size = 10, alpha = 0.8) +
   labs(title = "PCA of Mouse WT vs DKO ABC Transcriptomes",
        x = "PC1", y = "PC2", color = "Disease State") +
-  scale_color_manual(values=c("DKO" = 'red', "WT" = 'cornflowerblue')) +
+  scale_color_manual(values=c("SLE" = 'red', "Control" = 'cornflowerblue')) +
   theme_classic() +
   theme(axis.text = element_blank(),
         axis.title = element_text(size = 24),
@@ -116,12 +116,13 @@ top_cont <- sort((abs(res.var$contrib[,1]) + abs(res.var$contrib[,2])),
                  decreasing = TRUE) 
 top_cont
 
-#From top_cont, choose top-2 contributors and plot **DOESNT REALLY WORK, issue w using EntrezID to pull data
-p9 <- ggplot(as.data.frame(hX), aes(x=DCK, y = TNFAIP8)) +
-  geom_point(alpha = .35, size = 5, 
-             aes(fill = hID, color = hID)) +
-  labs(title = "Contribution of Top-2 Features to Diagnostic Separation") +
-  scale_color_manual(values=c("SLE" = 'red', "Control" = 'cornflowerblue')) +
+#From top_cont, choose top-2 contributors and plot
+p9 <- ggplot(as.data.frame(X), aes(x=X4930523C07Rik, y = Atp6v1g1)) +
+  geom_point(alpha = .8, size = 10, 
+             aes(color = ID)) +
+  labs(title = "Contribution of Top-2 Features to Diagnostic Separation",
+       color = "Disease State") +
+  scale_color_manual(values=c("DKO" = 'red', "WT" = 'cornflowerblue')) +
   theme_classic() +
   theme(axis.text = element_text(size = 20),
         axis.title = element_text(size = 24),
@@ -129,7 +130,11 @@ p9 <- ggplot(as.data.frame(hX), aes(x=DCK, y = TNFAIP8)) +
         plot.title = element_text(hjust=0.5, size = 24),
         legend.title = element_text(size = 18),
         legend.text = element_text(size = 18))
-p9
+#Print to pdf
+pdf(paste("../Figures/PCA_top2_mouse",".pdf", sep = ""), 
+    width = 10, height = 10) 
+print(p9)
+dev.off()
 
 ```
 
@@ -225,8 +230,8 @@ de_overlap <- rbind(high_de_overlap, low_de_overlap)
 human_gene_IDs <- mapIds(org.Hs.eg.db, de_overlap$ID, 'ENTREZID', 'SYMBOL')
 de_overlap$EntrezID <- human_gene_IDs
 de_overlap <- de_overlap[!is.na(de_overlap$EntrezID), ]
-
-de_reactome <- enrichPathway(gene=de_overlap$EntrezID, 
+gene <- de_overlap$EntrezID
+de_reactome <- enrichPathway(gene=gene, 
                              organism = "human",
                              pvalueCutoff = 0.05,
                              pAdjustMethod = "BH",
@@ -243,8 +248,8 @@ dev.off()
 ## Alternative Reactome network visualization
 edox <- setReadable(de_reactome, 'org.Hs.eg.db', 'ENTREZID')
 
-p3 <- cnetplot(edox, showCategory = 15, circular = TRUE, colorEdge = TRUE)
-
+p3 <- cnetplot(edox, showCategory = 30, circular = TRUE, colorEdge = TRUE)
+p3
 #Print to pdf
 pdf(paste("../Figures/Reactome_Network",".pdf", sep = ""), 
     width = 20, height = 8) 
