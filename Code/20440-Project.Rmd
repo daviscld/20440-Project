@@ -1,6 +1,6 @@
 ---
 title: "20440-Project"
-author: "Christine Davis"
+author: "Christine Davis, Bri Ko"
 date: "3/29/2021"
 output: html_document
 ---
