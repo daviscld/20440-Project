@@ -249,7 +249,7 @@ dev.off()
 edox <- setReadable(de_reactome, 'org.Hs.eg.db', 'ENTREZID')
 
 p3 <- cnetplot(edox, showCategory = 30, circular = TRUE, colorEdge = TRUE)
-p3
+
 #Print to pdf
 pdf(paste("../Figures/Reactome_Network",".pdf", sep = ""), 
     width = 20, height = 8) 
