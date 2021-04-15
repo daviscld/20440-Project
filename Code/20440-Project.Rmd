@@ -86,15 +86,15 @@ hID <- df_diagnosis$diagnosis
 #To run for mouse vs human, change X, ID (mouse) --> hX, hID (human)
 
 #Create pca model from Z-scored gene counts
-pca <- prcomp(hX)
+pca <- prcomp(X)
 
 ## Add sample info to PCs and plot
-labeled_PCs <- as.data.frame(cbind(hID, pca$x))
-plt <- ggplot(labeled_PCs, aes(x = PC1, y=PC2, color=hID)) + 
+labeled_PCs <- as.data.frame(cbind(ID, pca$x))
+plt <- ggplot(labeled_PCs, aes(x = PC1, y=PC2, color=ID)) + 
   geom_point(shape = 19, size = 10, alpha = 0.8) +
   labs(title = "PCA of Mouse WT vs DKO ABC Transcriptomes",
        x = "PC1", y = "PC2", color = "Disease State") +
-  scale_color_manual(values=c("SLE" = 'red', "Control" = 'cornflowerblue')) +
+  scale_color_manual(values=c("DKO" = 'red', "WT" = 'cornflowerblue')) +
   theme_classic() +
   theme(axis.text = element_blank(),
         axis.title = element_text(size = 24),
@@ -564,6 +564,6 @@ dev.off()
 #Use complex heatmap to overlay 4 heatmaps: 1) mouse DE genes, 2) human DE genes, 3) mouse DC genes (2 row, use mean expr 1 and mean expr 2 z-scored by column), 4) human DC genes (same as mouse)
 
 ```{r Complex Heatmap}
-
+cite_packages()
 ```
 

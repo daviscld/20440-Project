@@ -1,0 +1,34 @@
+---
+title: R packages used
+bibliography: pkg-refs.bib
+#csl: null.csl
+---
+
+- base [@base]
+- BiocManager [@BiocManager]
+- dendsort [@dendsort]
+- dnapath [@dnapath]
+- DOSE [@DOSE]
+- dplyr [@dplyr]
+- edgeR [@edgeR]
+- factoextra [@factoextra]
+- ggnewscale [@ggnewscale]
+- ggplot2 [@ggplot2]
+- ggrepel [@ggrepel]
+- githubinstall [@githubinstall]
+- gridExtra [@gridExtra]
+- limma [@limma]
+- org.Hs.eg.db [@org.Hs.eg.db]
+- org.Mm.eg.db [@org.Mm.eg.db]
+- pheatmap [@pheatmap]
+- reactome.db [@reactome.db]
+- ReactomePA [@ReactomePA]
+- readr [@readr]
+- Rgraphviz [@Rgraphviz]
+- SeqNet [@SeqNet]
+- tibble [@tibble]
+- tidyverse [@tidyverse]
+- topGO [@topGO]
+- viridis [@viridis]
+
+## References
