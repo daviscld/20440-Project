@@ -13,6 +13,9 @@ knitr::opts_chunk$set(echo = TRUE) #set knitr options
 #Load packages
 
 ```{r load, include=FALSE}
+#For BiocManager commands, uncomment the first time you run this code to install
+#packages directly using BiocManager. All other packages should be loaded using
+#Tools -> Install Packages
 library(readr)
 library(pheatmap)
 library(dendsort)
@@ -25,12 +28,33 @@ library(BiocManager)
 #BiocManager::install("biomaRt")
 library(dnapath)
 library(factoextra)
+library(org.Hs.eg.db)
+#BiocManager::install("org.Mm.eg.db")
+#BiocManager::install("DOSE")
+library(DOSE)
+library(ggnewscale)
+library(org.Mm.eg.db)
+library(githubinstall)
+#githubinstall("dnapath")
+library(dnapath)
+#BiocManager::install("reactome.db")
+#BiocManager::install("topGO")
+library(reactome.db)
+library(SeqNet)
+library(topGO)
+library(tidyverse)
+#BiocManager::install("ReactomePA")
+library(ReactomePA)
+library(VennDiagram)
+#BiocManager::install("ComplexHeatmap")
+library(ComplexHeatmap)
+library(circlize)
 set.seed(1234)  # random seed for reproducibility
 ```
 
-#Download and clean data !!!! SHOULD convert fpkm to tpm for final project
+#Download and clean data
 
-```{r GEO data from downloaded csv}
+```{r import data}
 # Import the data and look at the first six rows- gives data in log2 cpm
 data <- read.csv(file = '../Data/ABC_WT_DKO.csv')
 head(data)
@@ -57,7 +81,7 @@ hdata <- read.csv(file = '../Data/Human_SLE_Ctrl.csv')
 head(hdata)
 
 # Pull out gene names, counts (log2 cpm)
-hgenes <- hdata[,1:2]
+hgenes <- hdata[,1:2] 
 hcounts <- hdata[,4:ncol(hdata)]
 rownames(hcounts) <- hgenes[,1]
 hcounts <- hcounts[-which(is.na(hgenes[,2])),]
@@ -76,7 +100,7 @@ df_diagnosis$diagnosis <- rep(NA, length = nrow(df_diagnosis))
 df_diagnosis$diagnosis[which(grepl("HC", df_diagnosis$sample))] <- "Control"
 df_diagnosis$diagnosis[which(grepl("SLE", df_diagnosis$sample))] <- "SLE"
 hID <- df_diagnosis$diagnosis
-
+hX <- hX[order(rownames(hX)),]
 
 ```
 
@@ -107,33 +131,6 @@ plt <- ggplot(labeled_PCs, aes(x = PC1, y=PC2, color=ID)) +
 pdf(paste("../Figures/PCA_mouse",".pdf", sep = ""), 
     width = 10, height = 10) 
 print(plt)
-dev.off()
-
-#What drives PCA separation for each?
-res.var <- get_pca_var(pca) #variance of pca explained by each PC
-# PC Contributions summed over first and second PC
-top_cont <- sort((abs(res.var$contrib[,1]) + abs(res.var$contrib[,2])),
-                 decreasing = TRUE) 
-top_cont
-
-#From top_cont, choose top-2 contributors and plot
-p9 <- ggplot(as.data.frame(X), aes(x=X4930523C07Rik, y = Atp6v1g1)) +
-  geom_point(alpha = .8, size = 10, 
-             aes(color = ID)) +
-  labs(title = "Contribution of Top-2 Features to Diagnostic Separation",
-       color = "Disease State") +
-  scale_color_manual(values=c("DKO" = 'red', "WT" = 'cornflowerblue')) +
-  theme_classic() +
-  theme(axis.text = element_text(size = 20),
-        axis.title = element_text(size = 24),
-        axis.ticks = element_blank(), 
-        plot.title = element_text(hjust=0.5, size = 24),
-        legend.title = element_text(size = 18),
-        legend.text = element_text(size = 18))
-#Print to pdf
-pdf(paste("../Figures/PCA_top2_mouse",".pdf", sep = ""), 
-    width = 10, height = 10) 
-print(p9)
 dev.off()
 
 ```
@@ -210,6 +207,7 @@ dev.off()
 
 ```
 #Which genes are differentially expressed in both mouse and human models of SLE?
+#What Reactome pathways are those genes enriched in?
 
 ```{r DE overlaps}
 
@@ -255,95 +253,13 @@ pdf(paste("../Figures/Reactome_Network",".pdf", sep = ""),
     width = 20, height = 8) 
 print(p3)
 dev.off()
+
+
+
 ```
 
-
-# Create heatmap for 2 page report
-
-```{r Heatmap}
-
-#Temporarily only use top-100 most significant differentially expressed genes
-Xtmp <- X[,1:100]
-
-#Cluster genes using hierarchical clustering with average Euclidean distance
-order_cluster_cols <- hclust(dist(t(Xtmp)), method="average")
-
-#Define sorting function to sort dendrogram/clustering distances by magnitude
-sort_hclust <- function(...) as.hclust(dendsort(as.dendrogram(...)))
-
-#Sort columns and rows according to sorting function
-mat_cluster_cols <- sort_hclust(order_cluster_cols)
-mat_cluster_rows <- sort_hclust(hclust(dist(X)))
-
-#Define quantile_breaks function to take given matrix, split into 10 equal
-#pieces, and return break locations. This will be used to color the heatmap
-#with each color representing 10% of the data, to distinguish deciles
-quantile_breaks <- function(xs, n = 10) {
-  breaks <- quantile(xs, probs = seq(0, 1, length.out = n), na.rm = TRUE)
-  breaks[!duplicated(breaks)]
-}
-
-#Use break function to create breaks in gene expression data 
-mat_breaks <- quantile_breaks(Xtmp, n = 10)
-
-#Label heatmap rows with sample type, columns with gene names
-annotation_row = data.frame(strain = ID)
-rownames(annotation_row) <- rownames(Xtmp)
-
-#Provide colors for sample types
-my_colors <- list(
-  strain = c("WT" = '#8C02CC', "DKO" = '#5192C3'))
-
-#generate heatmap of log2 cpm count for top-100 differentially expressed genes,
-#using sample color assignment, clustering columns and rows in previously sorted 
-#order from sort_hclust, breaks from previously defined mat_breaks,
-#and providing specific font,cell, and dedrogram (tree) sizes
-
-plt <- pheatmap(Xtmp, color = viridis(9), 
-         annotation_colors = my_colors, 
-         annotation_row = annotation_row, 
-         cellwidth = 8, 
-         cellheight = 18, 
-         fontsize = 12, 
-         border_color = "grey", 
-         treeheight_row = 3, 
-         treeheight_col = 12,
-         breaks = mat_breaks,
-         cluster_cols = mat_cluster_cols,
-         cluster_rows = mat_cluster_rows,
-         cex = 0.7
-         )
-
-#Print heatmap to pdf
-pdf(paste("../Figures/Pheatmap",".pdf", sep = ""), 
-    width = 20, height = 8) 
-print(plt)
-dev.off()
-```
 
 #Differential connectivity
-
-```{r Package loading}
-
-library(org.Hs.eg.db)
-
-#BiocManager::install("org.Mm.eg.db")
-#BiocManager::install("DOSE")
-library(DOSE)
-library(ggnewscale)
-library(org.Mm.eg.db)
-library(githubinstall)
-#githubinstall("dnapath")
-library(dnapath)
-#BiocManager::install("reactome.db")
-#BiocManager::install("topGO")
-library(reactome.db)
-library(SeqNet)
-library(topGO)
-library(tidyverse)
-#BiocManager::install("ReactomePA")
-library(ReactomePA)
-```
 
 ``` {r DC analysis}
 #Convert gene names to Entrez IDs
@@ -372,8 +288,8 @@ results_mouse <- dnapath(mouse_Entrez_genes,
                    network_inference = run_corr,
                    method = "pearson")
 
-results_human <- filter_pathways(results_human, alpha_pathway = 0.01)
-results_mouse <- filter_pathways(results_mouse,alpha_pathway = 0.333) #limited by replicate number
+#results_human <- filter_pathways(results_human, alpha_pathway = 0.01)
+#results_mouse <- filter_pathways(results_mouse,alpha_pathway = 0.333) #limited by replicate number
 # Setting seed allows for reproducible work
 set.seed(123)
 results_mouse <- rename_genes(results_mouse, to = "symbol", species = "Mus musculus",
@@ -560,8 +476,234 @@ dev.off()
 
 ```
 
+# Venn Diagrams for both DE and DC analyses
+
+```{r Venn Diagrams}
+
+#Get all gene names that are differentially expressed and higher in SLE, DE
+#and lower in SLE, and differentially connected. Do for mouse and human.
+mouse_comparisons <- cbind(higher_de_mouse$ID, lower_de_mouse$ID,
+                          df_mouse$genes)
+human_comparisons<- cbind(higher_de_human$ID, lower_de_human$ID,
+                         df_human$genes)
+filenames <- c("../Figures/DE_higher_Venn.png",
+                  "../Figures/DE_lower_Venn.png",
+                  "../Figures/DC_Venn.png")
+
+#Plot Venn Diagram of DE overlaps, looping through each of 3 subsets
+#(DE and higher expression in SLE, DE and lower expression in SLE, DC)
+for (i in 1:3)
+{
+  mouse <- unique(mouse_comparisons[,i])
+  human <- unique(human_comparisons[,i])
+  file <- filenames[i]
+  
+  venn.diagram(
+  x = list(
+    human, 
+    toupper(mouse) #make mouse names uppercase for matching
+    ),
+  category.names = c("Human" , "Mouse"),
+  filename = file,
+  output = TRUE ,
+          imagetype="png" ,
+          height = 680 , 
+          width = 680 , 
+          resolution = 500,
+          compression = "lzw",
+          lwd = 1,
+          scaled = TRUE,
+          col=c("#440154ff", '#21908dff'), #choose colors for Venn
+          fill = c(alpha("#440154ff",0.3), alpha('#21908dff',0.3)),
+          cex = 0.5,
+          fontfamily = "serif",
+          ext.text = TRUE, #allow text outside diagram
+          cat.cex = c(0.6, 0.6), #scale category label size
+          cat.default.pos = "text",
+          cat.pos = c(-27, 180), #degree location of label around circles
+          cat.dist = c(0.055, -0.07), #distance of label from circle edge
+          cat.fontfamily = "serif",
+          cat.col = c("#440154ff", '#21908dff'),
+          ext.line.lwd = 0.8, #width of line to label
+          ext.line.lty = 3, #make line dotted (2 is solid)
+          ext.dist = c(0.015,-0.2), #distance of line to label
+          ext.length = 0.8 #length of line to label as % of 1
+        )
+}
+
+```
 
 #Use complex heatmap to overlay 4 heatmaps: 1) mouse DE genes, 2) human DE genes, 3) mouse DC genes (2 row, use mean expr 1 and mean expr 2 z-scored by column), 4) human DC genes (same as mouse)
+
+```{r Heatmap}
+
+X_tmp <- t(X[,which(toupper(colnames(X)) %in% colnames(hX))])
+X_tmp <- X_tmp[1:2000,]
+hX_tmp <- t(hX[,which(colnames(hX) %in% toupper(rownames(X_tmp)))])
+
+#Cluster genes using hierarchical clustering with average Euclidean distance
+order_cluster_cols <- hclust(dist(t(X_tmp)), method="average")
+
+#Define sorting function to sort dendrogram/clustering distances by magnitude
+sort_hclust <- function(...) as.hclust(dendsort(as.dendrogram(...)))
+
+#Sort columns and rows according to sorting function
+mat_cluster_cols <- sort_hclust(order_cluster_cols)
+mat_cluster_rows <- sort_hclust(hclust(dist(X_tmp)))
+
+#Define quantile_breaks function to take given matrix, split into 10 equal
+#pieces, and return break locations. This will be used to color the heatmap
+#with each color representing 10% of the data, to distinguish deciles
+quantile_breaks <- function(xs, n = 10) {
+  breaks <- quantile(xs, probs = seq(0, 1, length.out = n), na.rm = TRUE)
+  breaks[!duplicated(breaks)]
+}
+
+#Use break function to create breaks in gene expression data 
+mat_breaks <- quantile_breaks(X_tmp, n = 10)
+
+#Label heatmap rows with sample type, columns with gene names
+annotation_col = data.frame(strain = ID)
+rownames(annotation_col) <- colnames(X_tmp)
+
+#Provide colors for sample types
+my_colors <- list(
+  strain = c("WT" = '#8C02CC', "DKO" = '#5192C3'),
+  disease = c("SLE" = 'deeppink3', "Control" = 'darkviolet'),
+  Differential_Expression_Mouse = c("TRUE" = 'aquamarine2', "FALSE" = 'darkgrey'),
+  Differential_Expression_Human = c("TRUE" = 'cyan1', "FALSE" = 'darkgrey'),
+  Differential_Connectivity_Mouse = colorRamp2(c(-1, 0.5, 2), c("peachpuff", "pink2", "deeppink3")),
+  Differential_Connectivity_Human = colorRamp2(c(-0.1, 0.5, 2), c("lightyellow", "skyblue", "slateblue4")))
+
+#generate heatmap of log2 cpm count for differentially expressed genes,
+#using sample color assignment, clustering columns and rows in previously sorted 
+#order from sort_hclust, breaks from previously defined mat_breaks,
+#and providing specific font,cell, and dedrogram (tree) sizes
+
+p1 <- ComplexHeatmap::pheatmap(X_tmp, color = viridis(9), 
+         annotation_colors = my_colors, 
+         annotation_col = annotation_col, 
+         cellwidth = 18, 
+         cellheight = .2, 
+         fontsize = 0, 
+         border_color = NA, 
+         treeheight_row = 3, 
+         treeheight_col = 12,
+         breaks = mat_breaks,
+         cluster_cols = mat_cluster_cols,
+         cluster_rows = mat_cluster_rows,
+         )
+#Print heatmap to pdf
+pdf(paste("../Figures/Pheatmap_mouse",".pdf", sep = ""), 
+    width = 20, height = 20) 
+print(p1)
+dev.off()
+
+#Now build heatmap of human data that matches top selected mouse DEGs
+hX_reorder <- hX_tmp[toupper(mat_cluster_rows$labels),]
+annotation_col = data.frame(disease = sort(hID)) #make sure hID order correct
+rownames(annotation_col) <- colnames(hX_reorder)
+#uncomment below if you want to look at top human genes, not just overlap genes
+#hX_reorder <- hX[,which(colnames(hX) %in% full_results_human$ID[1:2000])]
+
+p2 <- ComplexHeatmap::pheatmap(hX_reorder, color = viridis(9), 
+         annotation_colors = my_colors, 
+         annotation_col = annotation_col, 
+         cellwidth = 2, 
+         cellheight = .2, 
+         fontsize = 0, 
+         treeheight_col = 0,
+         border_color = NA, 
+         cluster_cols = FALSE,
+         breaks = mat_breaks,
+         cluster_rows = FALSE
+         )
+#Print heatmap to pdf
+pdf(paste("../Figures/Pheatmap_human",".pdf", sep = ""), 
+    width = 20, height = 20) 
+print(p2)
+dev.off()
+
+#Build heatmap of significance of expression differences in mice
+Mouse_DEG_sig <- full_results_mouse[which(full_results_mouse$ID 
+                                          %in% rownames(X_tmp)),]
+rownames(Mouse_DEG_sig) <-Mouse_DEG_sig$ID
+Mouse_DEG_sig_reorder <- Mouse_DEG_sig[mat_cluster_rows$labels,8]
+
+#Build heatmap of significance of expression differences in humans
+Human_DEG_sig <- full_results_human[which(full_results_human$ID 
+                                          %in% toupper(rownames(X_tmp))),]
+rownames(Human_DEG_sig) <-Human_DEG_sig$ID
+Human_DEG_sig_reorder <- Human_DEG_sig[toupper(mat_cluster_rows$labels),8]
+
+#Build heatmap of differential connectivity in mice
+#df_mouse$dc_score, also include p.value
+#df_human$dc_score, also include p.value
+
+Mouse_DC_reorder <- df_mouse[which(df_mouse$genes %in% 
+                                              toupper(mat_cluster_rows$labels)),]
+Mouse_DC_reorder <- Mouse_DC_reorder[order(-Mouse_DC_reorder$dc_score),]
+Mouse_DC_reorder[which(Mouse_DC_reorder$pval > 0.35),3] <- 0
+
+dc_score_list_mouse <- list()
+i = 0
+for (gene in toupper(mat_cluster_rows$labels))
+{
+  i = i+1
+  if (gene %in% Mouse_DC_reorder$genes)
+  {
+    tmp <- Mouse_DC_reorder[which(grepl(gene, Mouse_DC_reorder$genes)),3]
+    dc_score_list_mouse[i] <- tmp[which.max(tmp)]
+  } else
+  {
+    dc_score_list_mouse[i] <- 0
+  }
+  names(dc_score_list_mouse)[i] <- gene
+}
+dc_score_list_mouse <- unlist(dc_score_list_mouse)
+
+
+#Repeat for human data
+Human_DC_reorder <- df_human[which(df_human$genes %in% 
+                                              toupper(mat_cluster_rows$labels)),]
+Human_DC_reorder <- Human_DC_reorder[order(-Human_DC_reorder$dc_score),]
+Human_DC_reorder[which(Human_DC_reorder$pval > 0.05),3] <- 0
+
+dc_score_list_human <- list()
+i = 0
+for (gene in toupper(mat_cluster_rows$labels))
+{
+  i = i+1
+  gene_list[i] <- gene
+  if (gene %in% Human_DC_reorder$genes)
+  {
+    tmp <- Human_DC_reorder[which(grepl(gene, Human_DC_reorder$genes)),3]
+    dc_score_list_human[i] <- tmp[which.max(tmp)]
+  } else
+  {
+    dc_score_list_human[i] <- 0
+  }
+  names(dc_score_list_human)[i] <- gene
+}
+dc_score_list_human <- unlist(dc_score_list_human)
+
+#Put all pieces together into complex heatmap
+
+plt <- p1+p2 + rowAnnotation(Differential_Expression_Mouse = Mouse_DEG_sig_reorder,
+                        col = my_colors) +
+  rowAnnotation(Differential_Expression_Human = Human_DEG_sig_reorder,
+                        col = my_colors) +
+  rowAnnotation(Differential_Connectivity_Mouse = scale(dc_score_list_mouse, center = TRUE, scale = TRUE),
+                col = my_colors) +
+  rowAnnotation(Differential_Connectivity_Human = scale(dc_score_list_human, center = TRUE, scale = TRUE),
+                col = my_colors)
+
+#Print heatmap to pdf
+pdf(paste("../Figures/Complex_Heatmap",".pdf", sep = ""), 
+    width = 10, height = 15) 
+print(plt)
+dev.off()
+```
 
 ```{r Complex Heatmap}
 cite_packages()
