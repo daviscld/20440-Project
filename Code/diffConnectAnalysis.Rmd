@@ -26,35 +26,6 @@ library(org.Mm.eg.db)
 library(reactome.db)
 set.seed(1234)  # random seed for reproducibility
 ```
-
-# Download and clean data
-
-```{r GEO data from downloaded csv}
-# same as PCA_heatmap.Rmd code w/o normalized counts (e.g. mX, hX)
-### Mouse data
-# Import the data and pull out gene names, counts (log2 cpm)
-mdata <- read.csv(file = '../Data/ABC_WT_DKO.csv')
-mgenes <- mdata[,"genes"]
-mgenes <- mgenes[complete.cases(mgenes)]
-cpm_cols <- c("WT_1_log2.cpm.","WT_2_log2.cpm.", 
-              "DKO_1_log2.cpm.","DKO_2_log2.cpm.")
-mcounts <- mdata[mdata$genes %in% mgenes, cpm_cols]
-rownames(mcounts) <- mgenes
-mcounts <- t(mcounts) # samples x genes
-mcounts <- 2^mcounts # retrieve raw cpm values
-mID <- sub("\\_.*", "", rownames(mcounts)) # list of sample ptypes
-
-### Repeat for human data (in fpkm! raw counts = fpkm*transcipt_length...)
-hdata <- read.csv(file = '../Data/Human_SLE_Ctrl.csv')
-hgenes <- hdata[,c("ENTREZID","SYMBOL")]
-hgenes <- hgenes[complete.cases(hgenes),]
-hcounts <- hdata[hdata$ENTREZID %in% hgenes$ENTREZID,4:ncol(hdata)]
-hcounts <- hcounts[-which(grepl("2-Mar",hgenes[,2])),]
-hgenes <- hgenes[-which(grepl("2-Mar",hgenes[,2])),]
-rownames(hcounts) <- hgenes[,1]
-hcounts <- t(hcounts)
-hID <- sub("\\..*", "", rownames(hcounts))
-```
 # Functions
 
 ```{r Useful functions}
@@ -97,6 +68,34 @@ GOenrich <- function(geneList, genes, topGO_args) {
   return(res)
 }
 ```
+# Download and clean data
+
+```{r GEO data from downloaded csv}
+# same as PCA_heatmap.Rmd code w/o normalized counts (e.g. mX, hX)
+### Mouse data
+# Import the data and pull out gene names, counts (log2 cpm)
+mdata <- read.csv(file = '../Data/ABC_WT_DKO.csv')
+mgenes <- mdata[,"genes"]
+mgenes <- mgenes[complete.cases(mgenes)]
+cpm_cols <- c("WT_1_log2.cpm.","WT_2_log2.cpm.", 
+              "DKO_1_log2.cpm.","DKO_2_log2.cpm.")
+mcounts <- mdata[mdata$genes %in% mgenes, cpm_cols]
+rownames(mcounts) <- mgenes
+mcounts <- t(mcounts) # samples x genes
+mcounts <- 2^mcounts # retrieve raw cpm values
+mID <- sub("\\_.*", "", rownames(mcounts)) # list of sample ptypes
+
+### Repeat for human data (in fpkm! raw counts = fpkm*transcipt_length...)
+hdata <- read.csv(file = '../Data/Human_SLE_Ctrl.csv')
+hgenes <- hdata[,c("ENTREZID","SYMBOL")]
+hgenes <- hgenes[complete.cases(hgenes),]
+hcounts <- hdata[hdata$ENTREZID %in% hgenes$ENTREZID,4:ncol(hdata)]
+hcounts <- hcounts[-which(grepl("2-Mar",hgenes[,2])),]
+hgenes <- hgenes[-which(grepl("2-Mar",hgenes[,2])),]
+rownames(hcounts) <- hgenes[,1]
+hcounts <- t(hcounts)
+hID <- sub("\\..*", "", rownames(hcounts))
+```
 
 # Differential connectivity
 
@@ -116,12 +115,12 @@ react_paths_mouse <- get_reactome_pathways(species = "Mus musculus")
 results_human <- dnapath(hcounts, 
                          pathway_list = react_paths_human, 
                          groups = hID,
-                         network_inference = run_pcor)
+                         network_inference = run_pcor) # 797 pathways with multiple genes/pathway
 
 results_mouse <- dnapath(mouse_Entrez_genes, 
-                   pathway_list = react_paths_mouse, 
-                   groups = mID,
-                   network_inference = run_corr)
+                         pathway_list = react_paths_mouse, 
+                         groups = mID,
+                         network_inference = run_corr) # 587 pathways with multiple genes/pathway
 
 hres_sigpath <- filter_pathways(results_human, alpha_pathway = 0.01)
 mres_sigpath <- filter_pathways(results_mouse, alpha_pathway = 0.34) #limited by replicate number
@@ -129,9 +128,9 @@ mres_sigpath <- filter_pathways(results_mouse, alpha_pathway = 0.34) #limited by
 # Setting seed allows for reproducible work
 set.seed(123)
 mres_sigpath <- rename_genes(mres_sigpath, to = "symbol", species = "Mus musculus",
-                        dir_save = tempdir())
+                             dir_save = tempdir())
 hres_sigpath <- rename_genes(hres_sigpath, to = "symbol", species = "Homo Sapiens",
-                        dir_save = tempdir())
+                             dir_save = tempdir())
 
 plot(hres_sigpath[[length(hres_sigpath)]])
 plot(mres_sigpath[[length(mres_sigpath)]])
@@ -141,15 +140,15 @@ h_nw <- get_networks(hres_sigpath[[length(hres_sigpath)]])
 m_nw <- get_networks(mres_sigpath[[length(mres_sigpath)]])
 
 # Plot the networks using the SeqNet::plot_network function.
-h_nwGraph <- SeqNet::plot_network(h_nw[[1]])
-SeqNet::plot_network(h_nw[[1]], compare_graph = h_nwGraph)
-
-m_nwGraph <- SeqNet::plot_network(m_nw[[1]])
-SeqNet::plot_network(m_nw[[1]], compare_graph = m_nwGraph)
+# h_nwGraph <- SeqNet::plot_network(h_nw[[1]])
+# SeqNet::plot_network(h_nw[[1]], compare_graph = h_nwGraph)
+# 
+# m_nwGraph <- SeqNet::plot_network(m_nw[[1]])
+# SeqNet::plot_network(m_nw[[1]], compare_graph = m_nwGraph)
 
 # Plot of the differential network for pathway 1.
 # Use compare_graph to maintain same layout
-plot(hres_sigpath[[1]], compare_graph = h_nwGraph) # not working...
+# plot(hres_sigpath[[1]], compare_graph = h_nwGraph) # not working...
 
 #Get dnapath_list format into dataframe for both mouse and human
 pathway <- list()
@@ -159,9 +158,9 @@ pval <- list()
 mean_expr1 <- list()
 mean_expr2 <- list()
 
-for (path in 1:length(hres_sigpath))
+for (path in 1:length(results_human))
 {
-  tmp <- summary(hres_sigpath[[path]], by_gene = TRUE)
+  tmp <- summary(results_human[[path]], by_gene = TRUE)
   pathway <- append(pathway, tmp$pathway)
   genes <- append(genes, tmp$genes)
   dc_score <- append(dc_score, tmp$dc_score)
@@ -171,11 +170,30 @@ for (path in 1:length(hres_sigpath))
 }
 
 df_human <- data.frame(pathway = unlist(pathway),
-                       genes = unlist(genes),
+                       entrez = unlist(genes),
+                       symbol = h_entrez[match(unlist(genes), names(h_entrez))],
                        dc_score = unlist(dc_score),
                        pval = unlist(pval),
                        mean_expr1 = unlist(mean_expr1),
                        mean_expr2 = unlist(mean_expr2))
+
+# for (path in 1:length(hres_sigpath))
+# {
+#   tmp <- summary(hres_sigpath[[path]], by_gene = TRUE)
+#   pathway <- append(pathway, tmp$pathway)
+#   genes <- append(genes, tmp$genes)
+#   dc_score <- append(dc_score, tmp$dc_score)
+#   pval <- append(pval, tmp$p_value)
+#   mean_expr1 <- append(mean_expr1, tmp$mean_expr1)
+#   mean_expr2 <- append(mean_expr2, tmp$mean_expr2)
+# }
+# 
+# df_human <- data.frame(pathway = unlist(pathway),
+#                        genes = unlist(genes),
+#                        dc_score = unlist(dc_score),
+#                        pval = unlist(pval),
+#                        mean_expr1 = unlist(mean_expr1),
+#                        mean_expr2 = unlist(mean_expr2))
 
 pathway <- list()
 genes <- list()
@@ -184,9 +202,9 @@ pval <- list()
 mean_expr1 <- list()
 mean_expr2 <- list()
 
-for (path in 1:length(mres_sigpath))
+for (path in 1:length(results_mouse))
 {
-  tmp <- summary(mres_sigpath[[path]], by_gene = TRUE)
+  tmp <- summary(results_mouse[[path]], by_gene = TRUE)
   pathway <- append(pathway, tmp$pathway)
   genes <- append(toupper(genes), tmp$genes)
   dc_score <- append(dc_score, tmp$dc_score)
@@ -196,11 +214,30 @@ for (path in 1:length(mres_sigpath))
 }
 
 df_mouse <- data.frame(pathway = unlist(pathway),
-                       genes = unlist(genes),
+                       entrez = unlist(genes),
+                       symbol = names(m_entrez)[match(unlist(genes), m_entrez)],
                        dc_score = unlist(dc_score),
                        pval = unlist(pval),
                        mean_expr1 = unlist(mean_expr1),
                        mean_expr2 = unlist(mean_expr2))
+
+# for (path in 1:length(mres_sigpath))
+# {
+#   tmp <- summary(mres_sigpath[[path]], by_gene = TRUE)
+#   pathway <- append(pathway, tmp$pathway)
+#   genes <- append(toupper(genes), tmp$genes)
+#   dc_score <- append(dc_score, tmp$dc_score)
+#   pval <- append(pval, tmp$p_value)
+#   mean_expr1 <- append(mean_expr1, tmp$mean_expr1)
+#   mean_expr2 <- append(mean_expr2, tmp$mean_expr2)
+# }
+# 
+# df_mouse <- data.frame(pathway = unlist(pathway),
+#                        genes = unlist(genes),
+#                        dc_score = unlist(dc_score),
+#                        pval = unlist(pval),
+#                        mean_expr1 = unlist(mean_expr1),
+#                        mean_expr2 = unlist(mean_expr2))
 
 # Overlap in DCGs
 df_human_overlap <- unique(df_human$genes[which(df_human$genes %in% df_mouse$genes)])
@@ -237,7 +274,6 @@ p2 <-  ggplot(oo, aes(x=reorder(Pathway, Count), y=Count)) +
         axis.title = element_text(size = 50),
         axis.ticks = element_blank(), 
         plot.title = element_text(hjust=0.5, size = 50))
-p2
 
 #Now only look at Reactome pathways from differentially connected AND expressed
 df_human_sort <- data.frame(df_human[order(-df_human$dc_score),])
@@ -263,12 +299,6 @@ p3 <-  ggplot(subset(df_human_sort_rank, Count >1),
         axis.title = element_text(size = 50),
         axis.ticks = element_blank(), 
         plot.title = element_text(hjust=0.5, size = 50))
-
-#Print plot to pdf
-pdf(paste("../Figures/Reactome_DC_DE",".pdf", sep = ""),
-    width = 45, height = 40) 
-print(p3)
-dev.off()
 ```
 
 #DC Volcano plots
@@ -305,7 +335,7 @@ plt <- ggplot(mouse_overlap, aes(x = dc_score, y = logpval, col=Significant,
 
 # GO Enrichment of overlapping DCs using topGO
 
-``` {GO enrichment}
+``` {r GO enrichment}
 # GO enrichment of DEGs
 # documentation: https://www.bioconductor.org/packages/devel/bioc/vignettes/topGO/inst/doc/topGO.pdf
 # walkthru: https://ucdavis-bioinformatics-training.github.io/2018-June-RNA-Seq-Workshop/friday/enrichment.html
@@ -314,8 +344,11 @@ geneSelectFun <- function(x)x
 go_args <- c("BP", geneSelectFun, "org.Mm.eg.db", "SYMBOL")
 
 ### Mouse
+# Convert genes to mouse format
+library(stringr)
+df_mouse$genes <- str_to_title(df_mouse$genes)
+
 # Output GO enrichment results as c(GOdata, resFisher, resKS, resKS.elim, allRes)
-# DOESN'T WORK BECAUSE TOO FEW PVALS (0.33, 0.67, or 1.0)?
 mGOres <- GOenrich(df_mouse$pval, df_mouse$genes, go_args) 
 mGOdata <- mGOres[[1]]
 mresFisher <- mGOres[[2]]
@@ -343,10 +376,84 @@ allRes <- GOres[[5]]
 showSigOfNodes(GOdata, score(resKS.elim), firstSigNodes = 5, useInfo = 'all')
 
 ```
+# GSEA stuff
 
+```{r GSEA}
+### For GSEA Pre-ranked
+htmp <- df_human[order(df_human$symbol, -df_human$dc_score),]
+htmp2 <- htmp[ !duplicated(htmp$symbol),]
+hprernk_dc <- data.frame(name = htmp2$symbol,
+                         metric = htmp2$dc_score*-log10(htmp2$pval))
+
+mtmp <- df_mouse[order(df_mouse$symbol, -df_mouse$dc_score),]
+mtmp2 <- mtmp[ !duplicated(mtmp$symbol),]
+mprernk_dc <- data.frame(name = mtmp2$symbol,
+                         metric = mtmp2$dc_score*-log10(mtmp2$pval))
+
+# write.table(hprernk_dc, file=file.path("../Data/hprernk_dc.rnk"),
+#             row.names=FALSE, sep="\t", quote=FALSE)
+# write.table(mprernk_dc, file=file.path("../Data/mprernk_dc.rnk"),
+#             row.names=FALSE, sep="\t", quote=FALSE)
+
+### Mouse and human non-SLE gene set overlap
+hctl_file <- file.path("../GSEA/human_DCprerank/gsea_report_for_na_neg_1620863432696.tsv")
+mctl_file <- file.path("../GSEA/mouse_DCprerank/gsea_report_for_na_neg_1620862959177.tsv")
+hgsea_ctl <- read.delim(hctl_file) # 12 sets
+mgsea_ctl <- read.delim(mctl_file) # 0 sets
+
+hgsea_ctl05 <- hgsea_ctl[which(hgsea_ctl$FDR.q.val<0.25 & hgsea_ctl$NOM.p.val<0.05),
+                         c("NAME","SIZE","NES","NOM.p.val","FDR.q.val")]
+mgsea_ctl05 <- mgsea_ctl[which(mgsea_ctl$FDR.q.val<0.25 & mgsea_ctl$NOM.p.val<0.05),
+                         c("NAME","SIZE","NES","NOM.p.val","FDR.q.val")]
+ctl_overlap <- intersect(hgsea_ctl05$NAME, mgsea_ctl05$NAME)
+
+### Mouse and human SLE gene set overlap
+hsle_file <- file.path("../GSEA/human_DCprerank/gsea_report_for_na_pos_1620863432696.tsv")
+msle_file <- file.path("../GSEA/mouse_DCprerank/gsea_report_for_na_pos_1620862959177.tsv")
+hgsea_sle <- read.delim(hsle_file) # 761 sets
+mgsea_sle <- read.delim(msle_file) # 674 sets
+
+hgsea_sle05 <- hgsea_sle[which(hgsea_sle$FDR.q.val<0.25 & hgsea_sle$NOM.p.val<0.05),
+                         c("NAME","SIZE","NES","NOM.p.val","FDR.q.val")]
+mgsea_sle05 <- mgsea_sle[which(mgsea_sle$FDR.q.val<0.25 & mgsea_sle$NOM.p.val<0.05),
+                         c("NAME","SIZE","NES","NOM.p.val","FDR.q.val")]
+sle_overlap <- intersect(hgsea_sle05$NAME, mgsea_sle05$NAME)
+
+### Dot plots
+# Overlap; since 0 mouse ctl, skip that condition
+ggplot(hgsea_sle05[hgsea_sle05$NAME %in% sle_overlap,], 
+       aes(x=-log10(NOM.p.val),
+           y=substring(NAME,10,50),
+           size=SIZE,
+           color=NES)) +
+  geom_point() +
+  scale_color_gradient(low = "blue", high = "red") +
+  theme_bw() +
+  ylab("Reactome Pathways") +
+  xlab("-log10(pval)") +
+  ggtitle("Overlapping DC Pathways - Human SLE")
+ggplot(mgsea_sle05[mgsea_sle05$NAME %in% sle_overlap,], 
+       aes(x=-log10(NOM.p.val),
+           y=substring(NAME,10,50),
+           size=SIZE,
+           color=NES)) +
+  geom_point() +
+  scale_color_gradient(low = "blue", high = "red") +
+  theme_bw() +
+  ylab("Reactome Pathways") +
+  xlab("-log10(pval)") +
+  ggtitle("Overlapping DC Pathways - Mouse DKO")
+
+```
 # Visualization
 
 ```{r visualize functional enrichment}
+### Mouse dotplot
+df_dot <- mallRes[,c("Term","elimKS")]
+df_dot <- df_dot[1:20,]
+dotchart(as.numeric(df_dot$elimKS), labels=df_dot$Term, cex=.7,
+         main="Mouse DCG enrichment for GO terms", xlab="KS elim pval")
+
 ### Human dotplot
 df_dot <- hallRes[,c("Term","elimKS")]
 df_dot <- df_dot[1:20,]
@@ -357,7 +464,7 @@ dotchart(as.numeric(df_dot$elimKS), labels=df_dot$Term, cex=.7,
 df_dot <- allRes[,c("Term","elimKS")]
 df_dot <- df_dot[1:20,]
 dotchart(as.numeric(df_dot$elimKS), labels=df_dot$Term, cex=.7,
-         main="DCG Overlap enrichment for GO terms", xlab="KS elim pval")
+         main="Overlap DCG enrichment for GO terms", xlab="KS elim pval")
 
 # Save dot plots to pdf
 # had to manually save

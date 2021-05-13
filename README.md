@@ -10,19 +10,23 @@ expression). In the future, this repository will contain all  code associated
 with the 20.440 class project.
 
 ## Data
-Data used are publicly available and found in GEO, accession number GSE99480.
+Data used are publicly available and found in GEO, accession numbers GSE99480 (mouse) and GSE118254 (human).
 
 Original data come from:
 
-Manni M, Gupta S, Ricker E, Chinenov Y et al. Regulation of age-associated B 
+### Manni M, Gupta S, Ricker E, Chinenov Y et al. Regulation of age-associated B 
 cells by IRF5 in systemic autoimmunity. Nat Immunol 2018 Apr;19(4):407-419.
 DOI 10.1038/s41590-018-0056-8
 
-Data are log2 cpm (counts/million counts) gene counts generated from flow 
+Data are log2 CPM (Counts Per Million) gene counts generated from flow 
 cytometry-selected age-associated B cells from 2 wild-type mice and 2 mice with 
 double-knock outs in the SWEF-family proteins. Data include authors' original 
 differential expression results using EDGER, but this analysis is re-done using 
 limma in this project.
+
+### Scharer, C.D., Blalock, E.L., Mi, T. et al. Epigenetic programming underpins B cell dysfunction in human SLE. Nat Immunol 20, 1071–1082 (2019). https://doi.org/10.1038/s41590-019-0419-9
+
+Data are FPKM (Fragments Per Kilobase of transcript per Million) gene counts generated from FACS-sorted B cells from 37 control and 46 SLE human patients.
 
 ## Folder structure
 Figures generated are stored in a Figures subfolder, data are stored in the

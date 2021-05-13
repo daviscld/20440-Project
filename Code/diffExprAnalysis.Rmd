@@ -82,32 +82,32 @@ GOenrich <- function(geneList, genes, topGO_args) {
   #       - geneSelectFun: function to select significant genes??? INCORPORATE PVAL<0.05 HERE?
   #       - mapping: string of what database to use for mapping
   #       - ID: type of gene ID (e.g. symbol, entrez)
-  
+
   ### Output
   #     ???: GO enriched terms and stats
-  
+
   names(geneList) <- genes
-  
+
   # Create topGOdata object
   GOdata <- new("topGOdata",
                 ontology = go_args[[1]],
                 allGenes = geneList,
                 geneSelectionFun = go_args[[2]],
-                annot = annFUN.org, 
+                annot = annFUN.org,
                 mapping = go_args[[3]],
                 ID = go_args[[4]])
-  
+
   # Run several kinds of enrichment tests
   resFisher <- runTest(GOdata, algorithm = "classic", statistic = "fisher")
   resKS <- runTest(GOdata, algorithm = "classic", statistic = "ks")
   resKS.elim <- runTest(GOdata, algorithm = "elim", statistic = "ks")
-  
+
   # Generate table of results of enrichment results
   allRes <- GenTable(GOdata, classicFisher = resFisher,
                      classicKS = resKS, elimKS = resKS.elim,
-                     orderBy = "elimKS", ranksOf = "classicFisher", 
+                     orderBy = "elimKS", ranksOf = "classicFisher",
                      topNodes = 20)
-  
+
   res <- list(GOdata, resFisher, resKS, resKS.elim, allRes)
   return(res)
 }
@@ -126,8 +126,11 @@ cpm_cols <- c("WT_1_log2.cpm.","WT_2_log2.cpm.",
               "DKO_1_log2.cpm.","DKO_2_log2.cpm.")
 mcounts <- mdata[mdata$genes %in% mgenes, cpm_cols]
 rownames(mcounts) <- mgenes
-mcounts <- t(mcounts) # samples x genes
 mcounts <- 2^mcounts # retrieve raw cpm values
+colnames(mcounts) <- substr(colnames(mcounts), 1, nchar(colnames(mcounts))-nchar("_log2.cpm."))
+# write.table(mcounts, file.path("../Data/mcounts.txt"), quote=FALSE, sep = "\t", dec = ".",
+#             row.names = TRUE, col.names = TRUE)
+mcounts <- t(mcounts) # samples x genes
 mID <- sub("\\_.*", "", rownames(mcounts)) # list of sample ptypes
 
 ### Repeat for human data (in fpkm! raw counts = fpkm*transcipt_length...)
@@ -137,9 +140,13 @@ hgenes <- hgenes[complete.cases(hgenes),]
 hcounts <- hdata[hdata$ENTREZID %in% hgenes$ENTREZID,4:ncol(hdata)]
 hcounts <- hcounts[-which(grepl("2-Mar",hgenes[,2])),]
 hgenes <- hgenes[-which(grepl("2-Mar",hgenes[,2])),]
-rownames(hcounts) <- hgenes[,1]
+rownames(hcounts) <- hgenes[,2]
+colnames(hcounts) <- substr(colnames(hcounts), 1, nchar(colnames(hcounts))-nchar(".fpkm"))
+# write.table(hcounts, "hcounts.txt", quote=FALSE, sep = "\t", dec = ".",
+#             row.names = TRUE, col.names = TRUE)
 hcounts <- t(hcounts)
 hID <- sub("\\..*", "", rownames(hcounts))
+
 ```
 
 # Differential Expression Analysis ("DE")
@@ -152,6 +159,7 @@ mres <- empiricalBayes(mcounts, mID, contrast="DKO-WT",
 ### Human
 hres <- empiricalBayes(hcounts, hID, contrast="SLE-HC", 
                        p_cutoff=0.05, fc_cutoff=1, topN=0.2*dim(hcounts)[2])
+
 ```
 # DEG overlap between human and mouse
 
@@ -180,13 +188,14 @@ human_GO_list <- as.list(human_GO_terms[mapped_genes])
 ```
 # GO Enrichment of DEGs using topGO
 
-``` {GO enrichment DEGs}
+``` {r GO enrichment DEGs}
 # GO enrichment of DEGs
 # documentation: https://www.bioconductor.org/packages/devel/bioc/vignettes/topGO/inst/doc/topGO.pdf
 # walkthru: https://ucdavis-bioinformatics-training.github.io/2018-June-RNA-Seq-Workshop/friday/enrichment.html
 ### Mouse
 # Set up input arguments
-geneSelectFun <- function(x)x
+# geneSelectFun <- function(x)
+geneSelectFun <- function(x){ return(x < 0.05)}
 go_args <- c("BP", geneSelectFun, "org.Mm.eg.db", "SYMBOL")
 
 # Output GO enrichment results
@@ -197,6 +206,8 @@ mresKS <- mGOres[[3]]
 mresKS.elim <- mGOres[[4]]
 mallRes <- mGOres[[5]]
 showSigOfNodes(mGOdata, score(mresKS.elim), firstSigNodes = 5, useInfo = 'all')
+
+m_nSigTerms <- sum(score(mresKS.elim)<0.05)
 
 ### Human
 # Set up input arguments
@@ -210,12 +221,15 @@ hresKS <- hGOres[[3]]
 hresKS.elim <- hGOres[[4]]
 hallRes <- hGOres[[5]]
 showSigOfNodes(hGOdata, score(hresKS.elim), firstSigNodes = 5, useInfo = 'all')
+
+h_nSigTerms <- sum(score(hresKS.elim)<0.05)
 ```
 # GO Enrichment of overlapping genes using topGO
 
-``` {GO enrichment overlap}
+``` {r GO enrichment overlap}
 # Set up input arguments and subset human data for overlap
-geneSelectFun <- function(x)x
+# geneSelectFun <- function(x)x
+selection <- function(allScore){ return(allScore < 0.05)}
 go_args <- c("BP", geneSelectFun, "org.Hs.eg.db", "SYMBOL")
 hres_overlap <- hres[which(hres$Symbol %in% overlap),]
 
@@ -228,27 +242,112 @@ resKS.elim <- GOres[[4]]
 allRes <- GOres[[5]]
 showSigOfNodes(GOdata, score(resKS.elim), firstSigNodes = 5, useInfo = 'all')
 
+nSigTerms <- sum(score(resKS.elim)<0.05)
+
+```
+# GSEA stuff
+
+```{r GSEA}
+### For GSEA Pre-ranked
+mprernk <- data.frame(name = mres$ID,
+                      metric = sign(mres$logFC) * mres$logpval)
+hprernk <- data.frame(name = hres$ID,
+                      metric = sign(hres$logFC) * hres$logpval)
+
+# write.table(mprernk, file=file.path("../Data/mprernk_deg.rnk"),
+#             row.names=FALSE, sep="\t", quote=FALSE)
+# write.table(hprernk, file=file.path("../Data/hprernk_deg.rnk"),
+#             row.names=FALSE, sep="\t", quote=FALSE)
+
+### Mouse and human non-SLE gene set overlap
+hctl_file <- file.path("../GSEA/human_DEGprerank/gsea_report_for_na_neg_1620851989820.tsv")
+mctl_file <- file.path("../GSEA/mouse_DEGprerank/gsea_report_for_na_neg_1620853009801.tsv")
+hgsea_ctl <- read.delim(hctl_file) # 584 sets
+mgsea_ctl <- read.delim(mctl_file) # 396 sets
+
+hgsea_ctl05 <- hgsea_ctl[which(hgsea_ctl$FDR.q.val<0.25 & hgsea_ctl$NOM.p.val<0.05),
+                         c("NAME","SIZE","NES","NOM.p.val","FDR.q.val")]
+mgsea_ctl05 <- mgsea_ctl[which(mgsea_ctl$FDR.q.val<0.25 & mgsea_ctl$NOM.p.val<0.05),
+                         c("NAME","SIZE","NES","NOM.p.val","FDR.q.val")]
+ctl_overlap <- intersect(hgsea_ctl05$NAME, mgsea_ctl05$NAME)
+
+### Mouse and human SLE gene set overlap
+hsle_file <- file.path("../GSEA/human_DEGprerank/gsea_report_for_na_pos_1620851989820.tsv")
+msle_file <- file.path("../GSEA/mouse_DEGprerank/gsea_report_for_na_pos_1620853009801.tsv")
+hgsea_sle <- read.delim(hsle_file) # 215 sets
+mgsea_sle <- read.delim(msle_file) # 395 sets
+
+hgsea_sle05 <- hgsea_sle[which(hgsea_sle$FDR.q.val<0.25 & hgsea_sle$NOM.p.val<0.05),
+                         c("NAME","SIZE","NES","NOM.p.val","FDR.q.val")]
+mgsea_sle05 <- mgsea_sle[which(mgsea_sle$FDR.q.val<0.25 & mgsea_sle$NOM.p.val<0.05),
+                         c("NAME","SIZE","NES","NOM.p.val","FDR.q.val")]
+sle_overlap <- intersect(hgsea_sle05$NAME, mgsea_sle05$NAME)
+
+### Dotplots
+# No SLE overlap; ignore this condition
+ggplot(hgsea_ctl05[hgsea_ctl05$NAME %in% ctl_overlap,], 
+       aes(x=-log10(NOM.p.val),
+           y=substring(NAME,10,50),
+           size=SIZE,
+           color=NES)) +
+  geom_point() +
+  scale_color_gradient(low = "blue", high = "red") +
+  theme_bw() +
+  ylab("Reactome Pathways") +
+  xlab("-log10(pval)") +
+  ggtitle("Overlapping DEG Pathways - Human HC")
+ggplot(mgsea_ctl05[mgsea_ctl05$NAME %in% ctl_overlap,], 
+       aes(x=-log10(NOM.p.val),
+           y=substring(NAME,10,50),
+           size=SIZE,
+           color=NES)) +
+  geom_point() +
+  scale_color_gradient(low = "blue", high = "red") +
+  theme_bw() +
+  ylab("Reactome Pathways") +
+  xlab("-log10(pval)") +
+  ggtitle("Overlapping DEG Pathways - Mouse WT")
+
+
 ```
 # Visualization
 
 ```{r visualize functional enrichment}
 ### Mouse dotplot
-df_dot <- mallRes[,c("Term","elimKS")]
-df_dot <- df_dot[1:20,]
-dotchart(as.numeric(df_dot$elimKS), labels=df_dot$Term, cex=.7,
-         main="Mouse enrichment for GO terms", xlab="KS elim pval")
+df_dot <- mallRes[1:20,c("Term","elimKS","Significant")]
+df_dot$elimKS <- as.numeric(df_dot$elimKS)
+colnames(df_dot)[3] <- "nSigGenes"
+ggplot(df_dot, aes(x=-log10(elimKS), y=reorder(Term, -elimKS), color=nSigGenes)) + 
+  geom_point(size=4) +
+  scale_color_gradient(low = "blue", high = "red") +
+  theme_bw() + 
+  ylab("GO Terms") + 
+  xlab("-log(KS elim pval)") + 
+  ggtitle("Top 20 Most Significant GO Terms in Mouse")
 
 ### Human dotplot
-df_dot <- hallRes[,c("Term","elimKS")]
-df_dot <- df_dot[1:20,]
-dotchart(as.numeric(df_dot$elimKS), labels=df_dot$Term, cex=.7,
-         main="Human enrichment for GO terms", xlab="KS elim pval")
+df_dot <- hallRes[1:20,c("Term","elimKS","Significant")]
+df_dot$elimKS <- as.numeric(df_dot$elimKS)
+colnames(df_dot)[3] <- "nSigGenes"
+ggplot(df_dot, aes(x=-log10(elimKS), y=reorder(Term,-elimKS), color=nSigGenes)) + 
+  geom_point(size=4) +
+  scale_color_gradient(low = "blue", high = "red") +
+  theme_bw() + 
+  ylab("GO Terms") + 
+  xlab("-log(KS elim pval)") + 
+  ggtitle("Top 20 Most Significant GO Terms in Human")
 
 ### Overlap dotplot
-df_dot <- allRes[,c("Term","elimKS")]
-df_dot <- df_dot[1:20,]
-dotchart(as.numeric(df_dot$elimKS), labels=df_dot$Term, cex=.7,
-         main="Mouse-Human overlap enrichment for GO terms", xlab="KS elim pval")
+df_dot <- allRes[1:20,c("Term","elimKS","Significant")]
+df_dot$elimKS <- as.numeric(df_dot$elimKS)
+colnames(df_dot)[3] <- "nSigGenes"
+ggplot(df_dot, aes(x=-log10(elimKS), y=reorder(Term,-elimKS), color=nSigGenes)) + 
+  geom_point(size=4) +
+  scale_color_gradient(low = "blue", high = "red") +
+  theme_bw() + 
+  ylab("GO Terms") + 
+  xlab("-log(KS elim pval)") + 
+  ggtitle("Top 20 Most Significant Species-Overlapping GO Terms")
 
 # Save dot plots to pdf
 # had to manually save
